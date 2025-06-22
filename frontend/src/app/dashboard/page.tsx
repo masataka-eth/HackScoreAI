@@ -1,0 +1,288 @@
+"use client";
+
+import { useAuth } from "@/app/providers";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Plus,
+  Settings,
+  LogOut,
+  Trophy,
+  Code,
+  Clock,
+  Play,
+} from "lucide-react";
+import { OctocatCharacter } from "@/components/octocat-character";
+import { BinaryBackground } from "@/components/binary-background";
+import Image from "next/image";
+
+interface Hackathon {
+  id: string;
+  name: string;
+  repositories: string[];
+  status: "pending" | "analyzing" | "completed" | "failed";
+  score?: number;
+  rank?: number;
+  totalParticipants?: number;
+  createdAt: string;
+}
+
+export default function DashboardPage() {
+  const { user, loading, signOut } = useAuth();
+  const router = useRouter();
+  const [hackathons, setHackathons] = useState<Hackathon[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  useEffect(() => {
+    if (loading) return;
+
+    if (!user) {
+      router.push("/login");
+    }
+  }, [user, loading, router]);
+
+  // ハッカソンデータを読み込み
+  const loadHackathons = async () => {
+    if (!user) return;
+
+    const userId = user.id;
+    if (!userId) return;
+
+    try {
+      const { hackathonOperations } = await import("@/lib/supabase");
+      const result = await hackathonOperations.getHackathons(userId);
+
+      if (result.success && result.data) {
+        setHackathons(result.data);
+      } else {
+        console.warn("Failed to load hackathons from database");
+        setHackathons([]);
+      }
+    } catch (error) {
+      console.error("Error loading hackathons:", error);
+      setHackathons([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadHackathons();
+  }, [user]);
+
+  // 手動でワーカー処理をトリガー
+  const triggerProcessing = async () => {
+    setIsProcessing(true);
+    try {
+      const { hackathonOperations } = await import("@/lib/supabase");
+      const result = await hackathonOperations.triggerWorkerProcessing();
+
+      if (result.success) {
+        alert("処理を開始しました。しばらくしてからページを更新してください。");
+        // 1秒後にハッカソン一覧を再読み込み
+        setTimeout(() => {
+          loadHackathons();
+        }, 1000);
+      } else {
+        alert("処理の開始に失敗しました");
+      }
+    } catch (error) {
+      console.error("Error triggering processing:", error);
+      alert("処理の開始に失敗しました");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // 定期的にハッカソン一覧を更新
+  useEffect(() => {
+    if (!user) return;
+
+    const interval = setInterval(() => {
+      loadHackathons();
+    }, 30000); // 30秒ごとに更新
+
+    return () => clearInterval(interval);
+  }, [user]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-muted-foreground">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return null;
+  }
+
+  return (
+    <div className="min-h-screen bg-background relative">
+      <BinaryBackground />
+      {/* ヘッダー */}
+      <header className="border-b border-border bg-card relative z-10">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">
+                {user.email}
+              </span>
+            </div>
+
+            {/* 中央のキャラクターとタイトル */}
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12">
+                <OctocatCharacter size="48" />
+              </div>
+              <Image
+                src="/logo.png"
+                alt="HackScore AI"
+                width={200}
+                height={40}
+                className="w-auto h-8"
+                priority
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* 開発者モード: Shift+Ctrl+クリックで手動開始ボタンを表示 */}
+              {process.env.NODE_ENV === "development" && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(e) => {
+                    if (e.shiftKey && e.ctrlKey) {
+                      triggerProcessing();
+                    }
+                  }}
+                  disabled={isProcessing}
+                  title="開発者モード: Shift+Ctrl+クリックで手動処理開始"
+                  className="opacity-30 hover:opacity-100"
+                >
+                  {isProcessing ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                  ) : (
+                    <Play className="w-4 h-4" />
+                  )}
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => router.push("/settings")}
+              >
+                <Settings className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  await signOut();
+                  router.push("/login");
+                }}
+              >
+                <LogOut className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main className="container mx-auto px-4 py-8 relative z-10">
+        {/* ハッカソン一覧 */}
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold">ハッカソン履歴</h2>
+            <Button
+              onClick={() => router.push("/hackathon/new")}
+              className="flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              新しいハッカソン
+            </Button>
+          </div>
+
+          {isLoading ? (
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+              <div className="text-muted-foreground">
+                ハッカソンデータを読み込み中...
+              </div>
+            </div>
+          ) : hackathons.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="text-muted-foreground mb-4">
+                まだハッカソンが登録されていません
+              </div>
+              <Button onClick={() => router.push("/hackathon/new")}>
+                <Plus className="w-4 h-4 mr-2" />
+                最初のハッカソンを登録
+              </Button>
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              {hackathons.map((hackathon) => (
+                <div
+                  key={hackathon.id}
+                  className="bg-card border border-border rounded-lg p-6 hover:border-primary/50 transition-colors cursor-pointer"
+                  onClick={() => router.push(`/hackathon/${hackathon.id}`)}
+                >
+                  <div className="flex items-start justify-between mb-4">
+                    <div>
+                      <h3 className="text-lg font-semibold mb-2 text-foreground">
+                        {hackathon.name}
+                      </h3>
+                      <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                        <div className="flex items-center gap-1">
+                          <Code className="w-4 h-4" />
+                          {hackathon.repositories.length} リポジトリ
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Clock className="w-4 h-4" />
+                          {hackathon.createdAt}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      {hackathon.status === "completed" ? (
+                        <div className="flex items-center gap-2 text-green-500">
+                          <Trophy className="w-4 h-4" />
+                          分析完了
+                        </div>
+                      ) : hackathon.status === "failed" ? (
+                        <div className="flex items-center gap-2 text-red-500">
+                          <Trophy className="w-4 h-4" />
+                          分析失敗
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-yellow-500">
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-500"></div>
+                          分析中...
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {hackathon.repositories.map((repo) => (
+                      <span
+                        key={repo}
+                        className="px-2 py-1 bg-secondary text-secondary-foreground rounded text-xs"
+                      >
+                        {repo}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
