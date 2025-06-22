@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 背景 -->
+  <rect width="32" height="32" fill="#000000" rx="4"/>
+  
+  <!-- Octocat顔（簡略版） -->
+  <g transform="translate(16, 16)">
+    <!-- 顔 -->
+    <circle cx="0" cy="0" r="10" fill="#24292e"/>
+    
+    <!-- 耳 -->
+    <path d="M -8,-8 Q -10,-12 -6,-10" fill="#24292e"/>
+    <path d="M 8,-8 Q 10,-12 6,-10" fill="#24292e"/>
+    
+    <!-- バンダナ -->
+    <path d="M -10,-6 Q 0,-8 10,-6 L 10,-2 Q 0,-4 -10,-2 Z" fill="#ff3366"/>
+    
+    <!-- 目 -->
+    <circle cx="-4" cy="0" r="2.5" fill="#ffffff"/>
+    <circle cx="4" cy="0" r="2.5" fill="#ffffff"/>
+    <circle cx="-4" cy="0.5" r="1.5" fill="#000000"/>
+    <circle cx="4" cy="0.5" r="1.5" fill="#000000"/>
+    
+    <!-- 口 -->
+    <path d="M -2,4 Q 0,5.5 2,4" fill="none" stroke="#ffffff" stroke-width="1" stroke-linecap="round"/>
+  </g>
+</svg> 
