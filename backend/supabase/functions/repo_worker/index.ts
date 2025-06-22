@@ -59,7 +59,8 @@ serve(async (req) => {
       // Read message from queue
       const { data: messages, error: readError } = await supabase.rpc('pgmq_read', {
         queue_name: 'repo_analysis_queue',
-        visibility_timeout: 300 // 5 minutes visibility timeout
+        visibility_timeout: 300, // 5 minutes visibility timeout
+        qty: 1
       })
 
       if (readError) {

@@ -14,8 +14,8 @@ RUN npm install
 # Copy source code
 COPY src/ ./src/
 
-# Create non-root user
-RUN useradd -m -u 1000 worker
+# Create non-root user (skip if UID already exists)
+RUN useradd -m worker || true
 USER worker
 
 EXPOSE 8080
