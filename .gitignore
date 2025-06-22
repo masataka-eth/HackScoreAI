@@ -88,7 +88,7 @@ dist
 
 # Gatsby files
 .cache/
-public
+# public  # Next.jsではpublicフォルダは管理対象にする必要があるためコメントアウト
 
 # Storybook build outputs
 .out

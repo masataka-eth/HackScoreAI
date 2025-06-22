@@ -14,6 +14,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { BinaryBackground } from "@/components/binary-background";
+import Image from "next/image";
 
 export default function Home() {
   const { user, loading, signIn } = useAuth();
@@ -85,10 +86,14 @@ export default function Home() {
                     AI-Powered Code Analysis
                   </div>
 
-                  <h1 className="text-5xl lg:text-7xl font-bold text-foreground">
-                    HackScore
-                    <span className="text-primary"> AI</span>
-                  </h1>
+                  <Image
+                    src="/logo.png"
+                    alt="HackScore AI"
+                    width={400}
+                    height={80}
+                    className="w-auto h-16 lg:h-24"
+                    priority
+                  />
 
                   <p className="text-xl lg:text-2xl text-muted-foreground max-w-xl">
                     Githubリポジトリから

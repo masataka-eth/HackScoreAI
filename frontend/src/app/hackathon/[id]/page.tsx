@@ -8,9 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ArrowLeft,
   Clock,
-  Code,
   Trophy,
-  Star,
   GitBranch,
   Calendar,
   ExternalLink,
@@ -414,6 +412,11 @@ export default function HackathonDetailPage() {
                               </div>
                             )}
                           </div>
+                          {isCompleted && repoStatus.evaluation && (
+                            <div className="text-2xl font-bold text-primary">
+                              {repoStatus.evaluation.total_score}点
+                            </div>
+                          )}
                           <Button
                             variant="outline"
                             size="sm"

@@ -205,8 +205,8 @@ export default function SettingsPage() {
             </p>
           </div>
 
-          {/* デバッグ情報 */}
-          <Card className="border-blue-500/20 bg-blue-500/10">
+          {/* デバッグ情報 - 開発時は以下のコメントを外してください */}
+          {/* <Card className="border-blue-500/20 bg-blue-500/10">
             <CardContent className="pt-6">
               <div className="text-sm space-y-2">
                 <div className="font-medium text-blue-700 dark:text-blue-300">
@@ -227,7 +227,7 @@ export default function SettingsPage() {
                 </div>
               </div>
             </CardContent>
-          </Card>
+          </Card> */}
 
           {/* Anthropic API Key */}
           <Card>

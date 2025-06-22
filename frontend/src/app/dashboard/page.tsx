@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { OctocatCharacter } from "@/components/octocat-character";
 import { BinaryBackground } from "@/components/binary-background";
+import Image from "next/image";
 
 interface Hackathon {
   id: string;
@@ -136,9 +137,14 @@ export default function DashboardPage() {
               <div className="w-12 h-12">
                 <OctocatCharacter size="48" />
               </div>
-              <h1 className="text-2xl font-bold text-foreground">
-                HackScore AI
-              </h1>
+              <Image
+                src="/logo.png"
+                alt="HackScore AI"
+                width={200}
+                height={40}
+                className="w-auto h-8"
+                priority
+              />
             </div>
 
             <div className="flex items-center gap-2">
@@ -243,14 +249,14 @@ export default function DashboardPage() {
 
                     <div className="text-right">
                       {hackathon.status === "completed" ? (
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-1 text-primary">
-                            <Trophy className="w-4 h-4" />#{hackathon.rank} /{" "}
-                            {hackathon.totalParticipants}
-                          </div>
-                          <div className="text-2xl font-bold text-foreground">
-                            {hackathon.score}点
-                          </div>
+                        <div className="flex items-center gap-2 text-green-500">
+                          <Trophy className="w-4 h-4" />
+                          分析完了
+                        </div>
+                      ) : hackathon.status === "failed" ? (
+                        <div className="flex items-center gap-2 text-red-500">
+                          <Trophy className="w-4 h-4" />
+                          分析失敗
                         </div>
                       ) : (
                         <div className="flex items-center gap-2 text-yellow-500">
