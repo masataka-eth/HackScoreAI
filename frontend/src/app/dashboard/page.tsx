@@ -4,8 +4,9 @@ import { useAuth } from "@/app/providers"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Plus, Settings, LogOut, Trophy, Code, Clock } from "lucide-react"
+import { Plus, Settings, LogOut, Trophy, Code, Clock, Play } from "lucide-react"
 import { OctocatCharacter } from "@/components/octocat-character"
+import { BinaryBackground } from "@/components/binary-background"
 
 interface Hackathon {
   id: string
@@ -23,6 +24,7 @@ export default function DashboardPage() {
   const router = useRouter()
   const [hackathons, setHackathons] = useState<Hackathon[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isProcessing, setIsProcessing] = useState(false)
 
   useEffect(() => {
     if (loading) return
@@ -33,39 +35,67 @@ export default function DashboardPage() {
   }, [user, loading, router])
 
   // ハッカソンデータを読み込み
-  useEffect(() => {
-    const loadHackathons = async () => {
-      if (!user) return
+  const loadHackathons = async () => {
+    if (!user) return
 
-      const userId = user.id
-      if (!userId) return
+    const userId = user.id
+    if (!userId) return
 
-      try {
-        const { hackathonOperations } = await import('@/lib/supabase')
-        const result = await hackathonOperations.getHackathons(userId)
-        
-        if (result.success && result.data) {
-          setHackathons(result.data)
-        } else {
-          // フォールバック: ローカルストレージから読み込み
-          const saved = localStorage.getItem('hackscoreai_hackathons')
-          if (saved) {
-            setHackathons(JSON.parse(saved))
-          }
-        }
-      } catch (error) {
-        console.error('Error loading hackathons:', error)
-        // フォールバック: ローカルストレージから読み込み
-        const saved = localStorage.getItem('hackscoreai_hackathons')
-        if (saved) {
-          setHackathons(JSON.parse(saved))
-        }
-      } finally {
-        setIsLoading(false)
+    try {
+      const { hackathonOperations } = await import('@/lib/supabase')
+      const result = await hackathonOperations.getHackathons(userId)
+      
+      if (result.success && result.data) {
+        setHackathons(result.data)
+      } else {
+        console.warn('Failed to load hackathons from database')
+        setHackathons([])
       }
+    } catch (error) {
+      console.error('Error loading hackathons:', error)
+      setHackathons([])
+    } finally {
+      setIsLoading(false)
     }
+  }
 
+  useEffect(() => {
     loadHackathons()
+  }, [user])
+
+  // 手動でワーカー処理をトリガー
+  const triggerProcessing = async () => {
+    setIsProcessing(true)
+    try {
+      const { hackathonOperations } = await import('@/lib/supabase')
+      const result = await hackathonOperations.triggerWorkerProcessing()
+      
+      if (result.success) {
+        alert('処理を開始しました。しばらくしてからページを更新してください。')
+        // 1秒後にハッカソン一覧を再読み込み
+        setTimeout(() => {
+          loadHackathons()
+        }, 1000)
+      } else {
+        alert('処理の開始に失敗しました')
+      }
+    } catch (error) {
+      console.error('Error triggering processing:', error)
+      alert('処理の開始に失敗しました')
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  // 定期的にハッカソン一覧を更新
+  useEffect(() => {
+    if (!user) return
+
+    const interval = setInterval(() => {
+      loadHackathons()
+    }, 30000) // 30秒ごとに更新
+
+    return () => clearInterval(interval)
   }, [user])
 
   if (loading) {
@@ -81,14 +111,22 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background relative">
+      <BinaryBackground />
       {/* ヘッダー */}
-      <header className="border-b border-border bg-card">
+      <header className="border-b border-border bg-card relative z-10">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">
+                {user.email}
+              </span>
+            </div>
+            
+            {/* 中央のキャラクターとタイトル */}
             <div className="flex items-center gap-4">
-              <div className="w-8 h-8">
-                <OctocatCharacter />
+              <div className="w-12 h-12">
+                <OctocatCharacter size="48" />
               </div>
               <h1 className="text-2xl font-bold text-foreground">
                 HackScore AI
@@ -96,9 +134,19 @@ export default function DashboardPage() {
             </div>
             
             <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">
-                {user.email}
-              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={triggerProcessing}
+                disabled={isProcessing}
+                title="保留中のジョブを手動で処理開始"
+              >
+                {isProcessing ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                ) : (
+                  <Play className="w-4 h-4" />
+                )}
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -121,18 +169,7 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8">
-        {/* アクションボタン */}
-        <div className="mb-8">
-          <Button
-            size="lg"
-            onClick={() => router.push('/hackathon/new')}
-            className="flex items-center gap-2"
-          >
-            <Plus className="w-5 h-5" />
-            新しいハッカソンを登録
-          </Button>
-        </div>
+      <main className="container mx-auto px-4 py-8 relative z-10">
 
         {/* ハッカソン一覧 */}
         <div className="space-y-6">

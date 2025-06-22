@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArrowLeft, Search, Plus, Building, Code, ChevronRight } from "lucide-react"
 import { OctocatCharacter } from "@/components/octocat-character"
+import { BinaryBackground } from "@/components/binary-background"
 
 interface GitHubOrg {
   id: number
@@ -16,6 +17,7 @@ interface GitHubOrg {
   description: string | null
   avatar_url: string
   public_repos: number
+  type: 'User' | 'Organization'
 }
 
 interface GitHubRepo {
@@ -32,6 +34,14 @@ interface GitHubRepo {
 export default function NewHackathonPage() {
   const { user, session, loading } = useAuth()
   const router = useRouter()
+  
+  // デバッグ用: セッション情報をログ出力
+  useEffect(() => {
+    if (session) {
+      console.log('Session Data:', session)
+      console.log('Provider Token:', session.provider_token)
+    }
+  }, [session])
   
   const [hackathonName, setHackathonName] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -52,33 +62,72 @@ export default function NewHackathonPage() {
 
   // GitHub 組織検索
   const searchOrganizations = async () => {
-    if (!searchQuery.trim() || !session?.provider_token) return
+    if (!searchQuery.trim()) return
+
+    // まずはアクセストークンがあるかチェック
+    if (!session?.provider_token) {
+      alert('GitHub認証が完了していません。再度ログインしてください。')
+      return
+    }
 
     setIsSearching(true)
+    setSearchResults([])
+    
     try {
-      const response = await fetch(`https://api.github.com/search/users?q=${encodeURIComponent(searchQuery)}+type:org`, {
-        headers: {
-          'Authorization': `Bearer ${session.provider_token}`,
-          'Accept': 'application/vnd.github.v3+json',
-        }
-      })
+      // GitHub Search API を使用して組織とユーザーを検索
+      const [orgResponse, userResponse] = await Promise.all([
+        // 組織を検索
+        fetch(`https://api.github.com/search/users?q=${encodeURIComponent(searchQuery)}+type:org&per_page=5`, {
+          headers: {
+            'Authorization': `Bearer ${session.provider_token}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'HackScore-AI'
+          }
+        }),
+        // ユーザーを検索
+        fetch(`https://api.github.com/search/users?q=${encodeURIComponent(searchQuery)}+type:user&per_page=5`, {
+          headers: {
+            'Authorization': `Bearer ${session.provider_token}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'HackScore-AI'
+          }
+        })
+      ])
 
-      if (response.ok) {
-        const data = await response.json()
-        setSearchResults(data.items || [])
-      } else {
-        console.error('GitHub API error:', response.statusText)
-        setSearchResults([])
+      const combinedResults: GitHubOrg[] = []
+
+      if (orgResponse.ok) {
+        const orgData = await orgResponse.json()
+        combinedResults.push(...orgData.items.map((item: any) => ({
+          ...item,
+          type: 'Organization' as const
+        })))
+      }
+
+      if (userResponse.ok) {
+        const userData = await userResponse.json()
+        combinedResults.push(...userData.items.map((item: any) => ({
+          ...item,
+          type: 'User' as const
+        })))
+      }
+
+      console.log('GitHub Search Results:', combinedResults)
+      setSearchResults(combinedResults)
+      
+      if (combinedResults.length === 0) {
+        alert('検索結果が見つかりませんでした。別のキーワードで試してください。')
       }
     } catch (error) {
       console.error('Search error:', error)
+      alert('ネットワークエラーが発生しました。インターネット接続を確認してください。')
       setSearchResults([])
     } finally {
       setIsSearching(false)
     }
   }
 
-  // 組織のリポジトリ一覧取得
+  // 組織またはユーザーのリポジトリ一覧取得
   const loadOrganizationRepos = async (org: GitHubOrg) => {
     if (!session?.provider_token) return
 
@@ -87,21 +136,48 @@ export default function NewHackathonPage() {
     setOrgRepos([])
     
     try {
-      const response = await fetch(`https://api.github.com/orgs/${org.login}/repos?sort=updated&per_page=100`, {
+      const userId = user?.id
+      if (!userId) throw new Error('ユーザーIDが取得できません')
+
+      // Vault からGitHub Personal Access Tokenを取得
+      const { vaultOperations } = await import('@/lib/supabase')
+      const githubTokenResult = await vaultOperations.getKey(userId, 'github_token')
+      
+      // 使用するトークンを決定（設定されたトークンがあればそれを優先、なければOAuthトークンを使用）
+      const accessToken = (githubTokenResult.success && githubTokenResult.data) 
+        ? githubTokenResult.data 
+        : session.provider_token
+
+      console.log('Using token type:', githubTokenResult.success && githubTokenResult.data ? 'Personal Access Token' : 'OAuth Token')
+
+      // 組織の場合は /orgs/{org}/repos、ユーザーの場合は /users/{user}/repos
+      const apiUrl = org.type === 'Organization' 
+        ? `https://api.github.com/orgs/${org.login}/repos?sort=updated&per_page=100&type=all`
+        : `https://api.github.com/users/${org.login}/repos?sort=updated&per_page=100&type=all`
+        
+      const response = await fetch(apiUrl, {
         headers: {
-          'Authorization': `Bearer ${session.provider_token}`,
+          'Authorization': `Bearer ${accessToken}`,
           'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'HackScore-AI'
         }
       })
 
       if (response.ok) {
         const repos = await response.json()
+        console.log(`Loaded ${repos.length} repositories (including private ones if accessible)`)
         setOrgRepos(repos)
       } else {
-        console.error('GitHub API error:', response.statusText)
+        console.error('GitHub API error:', response.status, response.statusText)
+        if (response.status === 401) {
+          alert('GitHubトークンの権限が不足しています。設定画面でPersonal Access Tokenを設定してください。')
+        } else if (response.status === 403) {
+          alert('APIレート制限に達しました。しばらく待ってから再試行してください。')
+        }
       }
     } catch (error) {
       console.error('Load repos error:', error)
+      alert(`リポジトリの取得に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`)
     } finally {
       setIsLoadingRepos(false)
     }
@@ -152,7 +228,9 @@ export default function NewHackathonPage() {
         alert('ハッカソンを登録し、評価を開始しました！')
         router.push('/dashboard')
       } else {
-        throw new Error('ハッカソンの登録に失敗しました')
+        console.error('Hackathon creation failed:', result)
+        const errorMsg = result.error?.message || result.error || 'ハッカソンの登録に失敗しました'
+        throw new Error(errorMsg)
       }
     } catch (error) {
       console.error('Submit error:', error)
@@ -173,9 +251,10 @@ export default function NewHackathonPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background relative">
+      <BinaryBackground />
       {/* ヘッダー */}
-      <header className="border-b border-border bg-card">
+      <header className="border-b border-border bg-card relative z-10">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center gap-4">
             <Button
@@ -186,8 +265,8 @@ export default function NewHackathonPage() {
               <ArrowLeft className="w-4 h-4" />
             </Button>
             <div className="flex items-center gap-4">
-              <div className="w-8 h-8">
-                <OctocatCharacter />
+              <div className="w-10 h-10">
+                <OctocatCharacter size="48" />
               </div>
               <h1 className="text-2xl font-bold text-foreground">
                 新しいハッカソンを登録
@@ -197,7 +276,7 @@ export default function NewHackathonPage() {
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8 max-w-4xl">
+      <main className="container mx-auto px-4 py-8 max-w-4xl relative z-10">
         <div className="space-y-6">
           {/* ステップ1: ハッカソン名入力 */}
           <Card>
@@ -231,7 +310,7 @@ export default function NewHackathonPage() {
             <CardContent className="space-y-4">
               <div className="flex gap-2">
                 <Input
-                  placeholder="組織名を入力..."
+                  placeholder="組織名を入力（例: microsoft, google, facebook）..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && searchOrganizations()}
@@ -244,6 +323,13 @@ export default function NewHackathonPage() {
                   )}
                 </Button>
               </div>
+              
+              {/* デバッグ情報表示 */}
+              {session && (
+                <div className="text-xs text-muted-foreground p-2 bg-muted rounded">
+                  認証状態: {session.provider_token ? '✅ GitHub トークン取得済み' : '❌ トークン未取得'}
+                </div>
+              )}
 
               {searchResults.length > 0 && (
                 <div className="space-y-2">
@@ -267,8 +353,17 @@ export default function NewHackathonPage() {
                         />
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
-                            <Building className="w-4 h-4 text-muted-foreground" />
+                            {org.type === 'Organization' ? (
+                              <Building className="w-4 h-4 text-blue-500" />
+                            ) : (
+                              <div className="w-4 h-4 rounded-full bg-green-500 flex items-center justify-center">
+                                <span className="text-xs text-white">U</span>
+                              </div>
+                            )}
                             <span className="font-medium">{org.login}</span>
+                            <span className="text-xs px-2 py-1 rounded bg-muted text-muted-foreground">
+                              {org.type === 'Organization' ? '組織' : 'ユーザー'}
+                            </span>
                           </div>
                           {org.description && (
                             <p className="text-sm text-muted-foreground mt-1">

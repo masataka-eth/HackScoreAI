@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArrowLeft, Key, Github, Save, Eye, EyeOff } from "lucide-react"
 import { OctocatCharacter } from "@/components/octocat-character"
+import { BinaryBackground } from "@/components/binary-background"
 
 export default function SettingsPage() {
   const { user, loading } = useAuth()
@@ -34,20 +35,36 @@ export default function SettingsPage() {
     setIsSaving(true)
     
     try {
+      console.log('🔍 Debug: User object:', user)
+      console.log('🔍 Debug: User ID:', user?.id)
+      
       const userId = user?.id
-      if (!userId) throw new Error('ユーザーIDが取得できません')
+      if (!userId) {
+        console.error('❌ User ID is missing')
+        throw new Error('ユーザーIDが取得できません。再度ログインしてください。')
+      }
 
       // Supabase Vault にキーを保存
       const { vaultOperations } = await import('@/lib/supabase')
       
       if (formData.anthropicKey) {
+        console.log('🔑 Storing Anthropic key for user:', userId)
         const result = await vaultOperations.storeKey(userId, 'anthropic_key', formData.anthropicKey)
-        if (!result.success) throw new Error('Anthropic API キーの保存に失敗しました')
+        console.log('🔑 Anthropic key store result:', result)
+        if (!result.success) {
+          console.error('❌ Anthropic key store failed:', result.error)
+          throw new Error(`Anthropic API キーの保存に失敗しました: ${result.error?.message || result.error}`)
+        }
       }
 
       if (formData.githubToken) {
+        console.log('🔑 Storing GitHub token for user:', userId)
         const result = await vaultOperations.storeKey(userId, 'github_token', formData.githubToken)
-        if (!result.success) throw new Error('GitHub トークンの保存に失敗しました')
+        console.log('🔑 GitHub token store result:', result)
+        if (!result.success) {
+          console.error('❌ GitHub token store failed:', result.error)
+          throw new Error(`GitHub トークンの保存に失敗しました: ${result.error?.message || result.error}`)
+        }
       }
 
       // ローカルには暗号化されたマーカーのみ保存
@@ -57,10 +74,21 @@ export default function SettingsPage() {
         savedAt: new Date().toISOString()
       }))
       
+      console.log('✅ Keys saved successfully')
       alert('設定を安全に保存しました')
     } catch (error) {
-      console.error('Error saving keys:', error)
-      alert(`設定の保存に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`)
+      console.error('❌ Error saving keys:', error)
+      
+      // エラーの詳細情報をアラートに表示
+      let errorMessage = error instanceof Error ? error.message : '不明なエラー'
+      if (error && typeof error === 'object' && 'code' in error) {
+        errorMessage += ` (コード: ${error.code})`
+      }
+      if (error && typeof error === 'object' && 'details' in error) {
+        errorMessage += ` 詳細: ${error.details}`
+      }
+      
+      alert(`設定の保存に失敗しました: ${errorMessage}`)
     } finally {
       setIsSaving(false)
     }
@@ -115,9 +143,10 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background relative">
+      <BinaryBackground />
       {/* ヘッダー */}
-      <header className="border-b border-border bg-card">
+      <header className="border-b border-border bg-card relative z-10">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center gap-4">
             <Button
@@ -128,8 +157,8 @@ export default function SettingsPage() {
               <ArrowLeft className="w-4 h-4" />
             </Button>
             <div className="flex items-center gap-4">
-              <div className="w-8 h-8">
-                <OctocatCharacter />
+              <div className="w-10 h-10">
+                <OctocatCharacter size="48" />
               </div>
               <h1 className="text-2xl font-bold text-foreground">
                 設定
@@ -139,13 +168,33 @@ export default function SettingsPage() {
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8 max-w-2xl">
+      <main className="container mx-auto px-4 py-8 max-w-2xl relative z-10">
         <div className="space-y-6">
           <div className="text-center mb-8">
             <p className="text-muted-foreground">
               ハッカソンの評価を開始するために、必要なAPI キーを設定してください
             </p>
           </div>
+
+          {/* デバッグ情報 */}
+          <Card className="border-blue-500/20 bg-blue-500/10">
+            <CardContent className="pt-6">
+              <div className="text-sm space-y-2">
+                <div className="font-medium text-blue-700 dark:text-blue-300">
+                  🔍 認証デバッグ情報
+                </div>
+                <div className="space-y-1 text-blue-600 dark:text-blue-400 font-mono">
+                  <div>ユーザーID: {user?.id || '未設定'}</div>
+                  <div>メール: {user?.email || '未設定'}</div>
+                  <div>認証状態: {user ? '✅ 認証済み' : '❌ 未認証'}</div>
+                  <div>ロール: {user?.role || '未設定'}</div>
+                  {user?.app_metadata && Object.keys(user.app_metadata).length > 0 && (
+                    <div>アプリメタデータ: {JSON.stringify(user.app_metadata, null, 2)}</div>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Anthropic API Key */}
           <Card>

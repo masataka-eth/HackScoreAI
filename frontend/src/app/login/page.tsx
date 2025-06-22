@@ -51,7 +51,7 @@ export default function LoginPage() {
           <div className="text-center">
             {/* 8bit Octocat マスコットキャラクター */}
             <div className="mb-8 flex justify-center">
-              <OctocatCharacter />
+              <OctocatCharacter size="128" />
             </div>
             
             <h1 className="text-4xl font-bold text-foreground mb-2">

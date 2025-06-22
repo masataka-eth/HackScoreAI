@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 
-export function OctocatCharacter() {
+export function OctocatCharacter({ size = "32" }: { size?: "32" | "48" | "128" }) {
   const [eyeBlink, setEyeBlink] = useState(false)
 
   useEffect(() => {
@@ -14,13 +14,19 @@ export function OctocatCharacter() {
     return () => clearInterval(interval)
   }, [])
 
+  const sizeClasses = {
+    "32": "w-8 h-8",
+    "48": "w-12 h-12", 
+    "128": "w-32 h-32"
+  }
+
   return (
-    <div className="relative w-32 h-32 mx-auto">
+    <div className={`relative ${sizeClasses[size]} mx-auto`}>
       {/* 8bit スタイル Octocat */}
       <div className="pixel-art">
         <svg
-          width="128"
-          height="128"
+          width={size === "32" ? "32" : size === "48" ? "48" : "128"}
+          height={size === "32" ? "32" : size === "48" ? "48" : "128"}
           viewBox="0 0 16 16"
           className="w-full h-full"
           style={{ imageRendering: "pixelated" }}
@@ -59,26 +65,30 @@ export function OctocatCharacter() {
         </svg>
       </div>
       
-      {/* コード文字が流れるエフェクト */}
-      <div className="absolute -inset-4 opacity-30 overflow-hidden pointer-events-none">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div
-            key={i}
-            className="absolute text-primary font-mono text-xs animate-pulse"
-            style={{
-              left: `${20 + i * 15}%`,
-              top: `${10 + (i % 3) * 30}%`,
-              animationDelay: `${i * 0.5}s`,
-            }}
-          >
-            {['01', '10', '11', '00'][i % 4]}
+      {size === "128" && (
+        <>
+          {/* コード文字が流れるエフェクト */}
+          <div className="absolute -inset-4 opacity-30 overflow-hidden pointer-events-none">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div
+                key={i}
+                className="absolute text-primary font-mono text-xs animate-pulse"
+                style={{
+                  left: `${20 + i * 15}%`,
+                  top: `${10 + (i % 3) * 30}%`,
+                  animationDelay: `${i * 0.5}s`,
+                }}
+              >
+                {['01', '10', '11', '00'][i % 4]}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      
-      {/* アクティビティインジケーター */}
-      <div className="absolute -top-2 -right-2 w-4 h-4 bg-primary rounded-full animate-ping opacity-75" />
-      <div className="absolute -top-2 -right-2 w-4 h-4 bg-primary rounded-full" />
+          
+          {/* アクティビティインジケーター */}
+          <div className="absolute -top-2 -right-2 w-4 h-4 bg-primary rounded-full animate-ping opacity-75" />
+          <div className="absolute -top-2 -right-2 w-4 h-4 bg-primary rounded-full" />
+        </>
+      )}
     </div>
   )
 }
