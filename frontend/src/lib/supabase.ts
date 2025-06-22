@@ -294,5 +294,109 @@ export const hackathonOperations = {
       console.error('Error getting evaluation summary:', error)
       return { success: false, error }
     }
+  },
+
+  // ハッカソンにリポジトリを追加
+  async addRepositoryToHackathon(hackathonId: string, repositoryName: string) {
+    try {
+      console.log('🔄 Adding repository to hackathon:', { hackathonId, repositoryName })
+      
+      // Check authentication status
+      const { data: { session }, error: authError } = await supabase.auth.getSession()
+      console.log('🔐 Current session:', { session: !!session, authError })
+      
+      if (!session) {
+        console.error('❌ No active session found')
+        throw new Error('認証が必要です。ログインしてください。')
+      }
+      
+      const { data, error } = await supabase.functions.invoke('add-repository', {
+        body: {
+          hackathonId,
+          repositoryName
+        }
+      })
+
+      console.log('📡 Edge Function response:', { data, error })
+
+      if (error) {
+        console.error('❌ Edge Function error:', error)
+        throw error
+      }
+      
+      return { success: true, data }
+    } catch (error) {
+      console.error('Error adding repository to hackathon:', error)
+      return { success: false, error }
+    }
+  },
+
+  // ハッカソンからリポジトリを削除
+  async removeRepositoryFromHackathon(hackathonId: string, repositoryName: string) {
+    try {
+      console.log('🗑️ Removing repository from hackathon:', { hackathonId, repositoryName })
+      
+      // Check authentication status
+      const { data: { session }, error: authError } = await supabase.auth.getSession()
+      console.log('🔐 Current session:', { session: !!session, authError })
+      
+      if (!session) {
+        console.error('❌ No active session found')
+        throw new Error('認証が必要です。ログインしてください。')
+      }
+      
+      const { data, error } = await supabase.functions.invoke('remove-repository', {
+        body: {
+          hackathonId,
+          repositoryName
+        }
+      })
+
+      console.log('📡 Edge Function response:', { data, error })
+
+      if (error) {
+        console.error('❌ Edge Function error:', error)
+        throw error
+      }
+      
+      return { success: true, data }
+    } catch (error) {
+      console.error('Error removing repository from hackathon:', error)
+      return { success: false, error }
+    }
+  },
+
+  // ハッカソンを削除
+  async deleteHackathon(hackathonId: string) {
+    try {
+      console.log('🗑️ Deleting hackathon:', { hackathonId })
+      
+      // Check authentication status
+      const { data: { session }, error: authError } = await supabase.auth.getSession()
+      console.log('🔐 Current session:', { session: !!session, authError })
+      
+      if (!session) {
+        console.error('❌ No active session found')
+        throw new Error('認証が必要です。ログインしてください。')
+      }
+      
+      const { data, error } = await supabase.functions.invoke('delete-hackathon', {
+        body: {
+          hackathonId
+        }
+      })
+
+      console.log('📡 Edge Function response:', { data, error })
+
+      if (error) {
+        console.error('❌ Edge Function error:', error)
+        throw error
+      }
+      
+      return { success: true, data }
+    } catch (error) {
+      console.error('Error deleting hackathon:', error)
+      return { success: false, error }
+    }
   }
 }

@@ -67,7 +67,7 @@ export default function SettingsPage() {
           console.error("❌ Anthropic key store failed:", result.error);
           throw new Error(
             `Anthropic API キーの保存に失敗しました: ${
-              result.error?.message || result.error
+              (result.error as any)?.message || result.error
             }`
           );
         }
@@ -85,7 +85,7 @@ export default function SettingsPage() {
           console.error("❌ GitHub token store failed:", result.error);
           throw new Error(
             `GitHub トークンの保存に失敗しました: ${
-              result.error?.message || result.error
+              (result.error as any)?.message || result.error
             }`
           );
         }

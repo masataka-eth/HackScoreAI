@@ -94,7 +94,7 @@ export default function HackathonDetailPage() {
         );
 
         if (result.success && result.data) {
-          setHackathon(result.data);
+          setHackathon(result.data as HackathonDetails);
         }
 
         // 評価サマリーを取得（順位表示用）

@@ -315,7 +315,7 @@ export default function NewHackathonPage() {
       } else {
         console.error("Hackathon creation failed:", result);
         const errorMsg =
-          result.error?.message ||
+          (result.error as any)?.message ||
           result.error ||
           "ハッカソンの登録に失敗しました";
         throw new Error(errorMsg);

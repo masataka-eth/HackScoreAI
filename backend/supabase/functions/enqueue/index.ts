@@ -63,7 +63,8 @@ serve(async (req) => {
       // Send message to pgmq queue with jobId
       const { data: queueResult, error: queueError } = await supabase.rpc('pgmq_send', {
         queue_name: 'repo_analysis_queue',
-        message: finalPayload
+        message: finalPayload,
+        delay_seconds: 0
       })
 
       if (queueError) {
