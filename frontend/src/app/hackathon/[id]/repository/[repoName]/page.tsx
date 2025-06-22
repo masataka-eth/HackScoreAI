@@ -212,7 +212,7 @@ ${evaluation_data.overallComment}
 
   if (loading || isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen bg-black flex items-center justify-center">
         <div className="text-center space-y-4">
           <OctocatCharacter />
           <div className="text-muted-foreground">Loading...</div>
@@ -223,7 +223,7 @@ ${evaluation_data.overallComment}
 
   if (!user || !evaluation) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen bg-black flex items-center justify-center">
         <div className="text-center space-y-4">
           <div className="text-muted-foreground">評価結果が見つかりません</div>
           <div className="text-sm text-muted-foreground space-y-2">

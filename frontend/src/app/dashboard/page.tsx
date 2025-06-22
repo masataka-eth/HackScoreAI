@@ -1,113 +1,121 @@
-"use client"
+"use client";
 
-import { useAuth } from "@/app/providers"
-import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Plus, Settings, LogOut, Trophy, Code, Clock, Play } from "lucide-react"
-import { OctocatCharacter } from "@/components/octocat-character"
-import { BinaryBackground } from "@/components/binary-background"
+import { useAuth } from "@/app/providers";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Plus,
+  Settings,
+  LogOut,
+  Trophy,
+  Code,
+  Clock,
+  Play,
+} from "lucide-react";
+import { OctocatCharacter } from "@/components/octocat-character";
+import { BinaryBackground } from "@/components/binary-background";
 
 interface Hackathon {
-  id: string
-  name: string
-  repositories: string[]
-  status: 'pending' | 'analyzing' | 'completed' | 'failed'
-  score?: number
-  rank?: number
-  totalParticipants?: number
-  createdAt: string
+  id: string;
+  name: string;
+  repositories: string[];
+  status: "pending" | "analyzing" | "completed" | "failed";
+  score?: number;
+  rank?: number;
+  totalParticipants?: number;
+  createdAt: string;
 }
 
 export default function DashboardPage() {
-  const { user, loading, signOut } = useAuth()
-  const router = useRouter()
-  const [hackathons, setHackathons] = useState<Hackathon[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [isProcessing, setIsProcessing] = useState(false)
+  const { user, loading, signOut } = useAuth();
+  const router = useRouter();
+  const [hackathons, setHackathons] = useState<Hackathon[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
-    if (loading) return
+    if (loading) return;
 
     if (!user) {
-      router.push('/login')
+      router.push("/login");
     }
-  }, [user, loading, router])
+  }, [user, loading, router]);
 
   // ハッカソンデータを読み込み
   const loadHackathons = async () => {
-    if (!user) return
+    if (!user) return;
 
-    const userId = user.id
-    if (!userId) return
+    const userId = user.id;
+    if (!userId) return;
 
     try {
-      const { hackathonOperations } = await import('@/lib/supabase')
-      const result = await hackathonOperations.getHackathons(userId)
-      
+      const { hackathonOperations } = await import("@/lib/supabase");
+      const result = await hackathonOperations.getHackathons(userId);
+
       if (result.success && result.data) {
-        setHackathons(result.data)
+        setHackathons(result.data);
       } else {
-        console.warn('Failed to load hackathons from database')
-        setHackathons([])
+        console.warn("Failed to load hackathons from database");
+        setHackathons([]);
       }
     } catch (error) {
-      console.error('Error loading hackathons:', error)
-      setHackathons([])
+      console.error("Error loading hackathons:", error);
+      setHackathons([]);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
-    loadHackathons()
-  }, [user])
+    loadHackathons();
+  }, [user]);
 
   // 手動でワーカー処理をトリガー
   const triggerProcessing = async () => {
-    setIsProcessing(true)
+    setIsProcessing(true);
     try {
-      const { hackathonOperations } = await import('@/lib/supabase')
-      const result = await hackathonOperations.triggerWorkerProcessing()
-      
+      const { hackathonOperations } = await import("@/lib/supabase");
+      const result = await hackathonOperations.triggerWorkerProcessing();
+
       if (result.success) {
-        alert('処理を開始しました。しばらくしてからページを更新してください。')
+        alert("処理を開始しました。しばらくしてからページを更新してください。");
         // 1秒後にハッカソン一覧を再読み込み
         setTimeout(() => {
-          loadHackathons()
-        }, 1000)
+          loadHackathons();
+        }, 1000);
       } else {
-        alert('処理の開始に失敗しました')
+        alert("処理の開始に失敗しました");
       }
     } catch (error) {
-      console.error('Error triggering processing:', error)
-      alert('処理の開始に失敗しました')
+      console.error("Error triggering processing:", error);
+      alert("処理の開始に失敗しました");
     } finally {
-      setIsProcessing(false)
+      setIsProcessing(false);
     }
-  }
+  };
 
   // 定期的にハッカソン一覧を更新
   useEffect(() => {
-    if (!user) return
+    if (!user) return;
 
     const interval = setInterval(() => {
-      loadHackathons()
-    }, 30000) // 30秒ごとに更新
+      loadHackathons();
+    }, 30000); // 30秒ごとに更新
 
-    return () => clearInterval(interval)
-  }, [user])
+    return () => clearInterval(interval);
+  }, [user]);
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen bg-black flex items-center justify-center">
         <div className="text-muted-foreground">Loading...</div>
       </div>
-    )
+    );
   }
 
   if (!user) {
-    return null
+    return null;
   }
 
   return (
@@ -122,7 +130,7 @@ export default function DashboardPage() {
                 {user.email}
               </span>
             </div>
-            
+
             {/* 中央のキャラクターとタイトル */}
             <div className="flex items-center gap-4">
               <div className="w-12 h-12">
@@ -132,16 +140,16 @@ export default function DashboardPage() {
                 HackScore AI
               </h1>
             </div>
-            
+
             <div className="flex items-center gap-2">
               {/* 開発者モード: Shift+Ctrl+クリックで手動開始ボタンを表示 */}
-              {process.env.NODE_ENV === 'development' && (
+              {process.env.NODE_ENV === "development" && (
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={(e) => {
                     if (e.shiftKey && e.ctrlKey) {
-                      triggerProcessing()
+                      triggerProcessing();
                     }
                   }}
                   disabled={isProcessing}
@@ -158,7 +166,7 @@ export default function DashboardPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => router.push('/settings')}
+                onClick={() => router.push("/settings")}
               >
                 <Settings className="w-4 h-4" />
               </Button>
@@ -166,8 +174,8 @@ export default function DashboardPage() {
                 variant="outline"
                 size="sm"
                 onClick={async () => {
-                  await signOut()
-                  router.push('/login')
+                  await signOut();
+                  router.push("/login");
                 }}
               >
                 <LogOut className="w-4 h-4" />
@@ -178,31 +186,32 @@ export default function DashboardPage() {
       </header>
 
       <main className="container mx-auto px-4 py-8 relative z-10">
-
         {/* ハッカソン一覧 */}
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold">ハッカソン履歴</h2>
             <Button
-              onClick={() => router.push('/hackathon/new')}
+              onClick={() => router.push("/hackathon/new")}
               className="flex items-center gap-2"
             >
               <Plus className="w-4 h-4" />
               新しいハッカソン
             </Button>
           </div>
-          
+
           {isLoading ? (
             <div className="text-center py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-              <div className="text-muted-foreground">ハッカソンデータを読み込み中...</div>
+              <div className="text-muted-foreground">
+                ハッカソンデータを読み込み中...
+              </div>
             </div>
           ) : hackathons.length === 0 ? (
             <div className="text-center py-12">
               <div className="text-muted-foreground mb-4">
                 まだハッカソンが登録されていません
               </div>
-              <Button onClick={() => router.push('/hackathon/new')}>
+              <Button onClick={() => router.push("/hackathon/new")}>
                 <Plus className="w-4 h-4 mr-2" />
                 最初のハッカソンを登録
               </Button>
@@ -231,13 +240,13 @@ export default function DashboardPage() {
                         </div>
                       </div>
                     </div>
-                    
+
                     <div className="text-right">
                       {hackathon.status === "completed" ? (
                         <div className="space-y-1">
                           <div className="flex items-center gap-1 text-primary">
-                            <Trophy className="w-4 h-4" />
-                            #{hackathon.rank} / {hackathon.totalParticipants}
+                            <Trophy className="w-4 h-4" />#{hackathon.rank} /{" "}
+                            {hackathon.totalParticipants}
                           </div>
                           <div className="text-2xl font-bold text-foreground">
                             {hackathon.score}点
@@ -251,7 +260,7 @@ export default function DashboardPage() {
                       )}
                     </div>
                   </div>
-                  
+
                   <div className="flex flex-wrap gap-2">
                     {hackathon.repositories.map((repo) => (
                       <span
@@ -269,5 +278,5 @@ export default function DashboardPage() {
         </div>
       </main>
     </div>
-  )
+  );
 }
