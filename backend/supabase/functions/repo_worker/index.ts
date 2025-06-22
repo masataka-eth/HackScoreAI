@@ -105,8 +105,8 @@ serve(async (req) => {
         const userId = message.message.userId || '11111111-1111-1111-1111-111111111111' // Test user for now
         const secrets = await getUserSecrets(supabase, userId)
         
-        // Process repositories with secrets
-        const result = await processRepositories(message.message, secrets)
+        // Process repositories with ClaudeCode
+        const result = await processRepositoriesWithClaudeCode(supabase, message.message, secrets)
 
         // Update job status to completed
         await supabase
@@ -221,7 +221,84 @@ async function getUserSecrets(supabase: any, userId: string) {
   return secrets
 }
 
-// Process repositories (placeholder for now)
+// Process repositories with ClaudeCode
+async function processRepositoriesWithClaudeCode(supabase: any, payload: any, secrets: { [key: string]: string | null } = {}) {
+  console.log('Processing repositories with ClaudeCode:', payload.repositories);
+  
+  if (!secrets.anthropicKey || !secrets.githubToken) {
+    throw new Error('Required API keys not found in vault');
+  }
+
+  try {
+    // Import ClaudeCode client
+    const { ClaudeCodeClient } = await import('../shared/claude-code-client.ts');
+    const client = new ClaudeCodeClient(secrets.anthropicKey, secrets.githubToken);
+
+    const results = [];
+    const userId = payload.userId || '11111111-1111-1111-1111-111111111111';
+
+    // Process each repository
+    for (const repoName of payload.repositories) {
+      console.log(`Analyzing repository: ${repoName}`);
+      
+      const { result: evaluationResult, metadata } = await client.analyzeRepository(repoName);
+      
+      if (evaluationResult) {
+        // Save evaluation result to database
+        const { data: savedResult, error: saveError } = await supabase.rpc('save_evaluation_result', {
+          p_job_id: payload.jobId, // Will be passed from job payload
+          p_user_id: userId,
+          p_repository_name: repoName,
+          p_evaluation_data: evaluationResult,
+          p_processing_metadata: metadata
+        });
+
+        if (saveError) {
+          console.error('Failed to save evaluation result:', saveError);
+        } else {
+          console.log(`✅ Evaluation result saved for ${repoName}:`, savedResult);
+        }
+
+        results.push({
+          repository: repoName,
+          success: true,
+          evaluationId: savedResult,
+          totalScore: evaluationResult.totalScore,
+          metadata
+        });
+      } else {
+        console.error(`❌ Failed to analyze ${repoName}`);
+        results.push({
+          repository: repoName,
+          success: false,
+          error: metadata.error,
+          metadata
+        });
+      }
+    }
+
+    return {
+      processedAt: new Date().toISOString(),
+      repositories: results,
+      totalRepositories: payload.repositories.length,
+      successfulAnalyses: results.filter(r => r.success).length,
+      evaluationCriteria: payload.evaluationCriteria,
+      requestId: payload.requestId,
+      vaultInfo: {
+        anthropicKeyAvailable: !!secrets.anthropicKey,
+        githubTokenAvailable: !!secrets.githubToken,
+        anthropicKeyPreview: secrets.anthropicKey ? secrets.anthropicKey.substring(0, 10) + '...' : null,
+        githubTokenPreview: secrets.githubToken ? secrets.githubToken.substring(0, 10) + '...' : null
+      }
+    };
+
+  } catch (error) {
+    console.error('Error in ClaudeCode processing:', error);
+    throw error;
+  }
+}
+
+// Legacy function for backward compatibility
 async function processRepositories(payload: any, secrets: { [key: string]: string | null } = {}) {
   console.log('Processing repositories:', payload.repositories)
   
