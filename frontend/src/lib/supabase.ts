@@ -264,5 +264,35 @@ export const hackathonOperations = {
       console.error('Error triggering worker:', error)
       return { success: false, error }
     }
+  },
+
+  // 評価詳細を取得
+  async getEvaluationDetails(evaluationId: string) {
+    try {
+      const { data, error } = await supabase.rpc('get_evaluation_details', {
+        p_evaluation_id: evaluationId
+      })
+
+      if (error) throw error
+      return { success: true, data }
+    } catch (error) {
+      console.error('Error getting evaluation details:', error)
+      return { success: false, error }
+    }
+  },
+
+  // 評価サマリーを取得
+  async getEvaluationSummary(userId: string) {
+    try {
+      const { data, error } = await supabase.rpc('get_evaluation_summary', {
+        p_user_id: userId
+      })
+
+      if (error) throw error
+      return { success: true, data }
+    } catch (error) {
+      console.error('Error getting evaluation summary:', error)
+      return { success: false, error }
+    }
   }
 }

@@ -1,81 +1,179 @@
-"use client"
+"use client";
 
-import { useAuth } from "@/app/providers"
-import { useRouter, useParams } from "next/navigation"
-import { useEffect, useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { ArrowLeft, Clock, Code, Trophy, Star, GitBranch, Calendar, ExternalLink } from "lucide-react"
-import { OctocatCharacter } from "@/components/octocat-character"
-import { BinaryBackground } from "@/components/binary-background"
+import { useAuth } from "@/app/providers";
+import { useRouter, useParams } from "next/navigation";
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  ArrowLeft,
+  Clock,
+  Code,
+  Trophy,
+  Star,
+  GitBranch,
+  Calendar,
+  ExternalLink,
+  Medal,
+  Crown,
+  Loader2,
+} from "lucide-react";
+import { OctocatCharacter } from "@/components/octocat-character";
+import { BinaryBackground } from "@/components/binary-background";
 
 interface HackathonDetails {
-  id: string
-  name: string
-  repositories: string[]
-  status: 'pending' | 'analyzing' | 'completed' | 'failed'
-  score?: number
-  rank?: number
-  totalParticipants?: number
-  createdAt: string
-  completedAt?: string
+  id: string;
+  name: string;
+  repositories: string[];
+  status: "pending" | "analyzing" | "completed" | "failed";
+  score?: number;
+  rank?: number;
+  totalParticipants?: number;
+  createdAt: string;
+  completedAt?: string;
   results?: {
-    overview: string
-    strengths: string[]
-    improvements: string[]
+    overview: string;
+    strengths: string[];
+    improvements: string[];
     repositoryScores: Array<{
-      repository: string
-      score: number
-      analysis: string
-    }>
-  }
+      repository: string;
+      score: number;
+      analysis: string;
+      evaluationId?: string;
+    }>;
+  };
+}
+
+interface RepositoryEvaluation {
+  id: string;
+  repository_name: string;
+  total_score: number;
+  overall_comment: string;
+  created_at: string;
+  job_id: string;
+}
+
+interface RepositoryStatus {
+  repository_name: string;
+  status: "completed" | "evaluating";
+  evaluation?: RepositoryEvaluation;
+  rank?: number;
 }
 
 export default function HackathonDetailPage() {
-  const { user, loading } = useAuth()
-  const router = useRouter()
-  const params = useParams()
-  const [hackathon, setHackathon] = useState<HackathonDetails | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const { user, loading } = useAuth();
+  const router = useRouter();
+  const params = useParams();
+  const [hackathon, setHackathon] = useState<HackathonDetails | null>(null);
+  const [repositoryEvaluations, setRepositoryEvaluations] = useState<
+    RepositoryEvaluation[]
+  >([]);
+  const [repositoryStatuses, setRepositoryStatuses] = useState<
+    RepositoryStatus[]
+  >([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (loading) return
+    if (loading) return;
 
     if (!user) {
-      router.push('/login')
+      router.push("/login");
     }
-  }, [user, loading, router])
+  }, [user, loading, router]);
 
   useEffect(() => {
     const loadHackathonDetails = async () => {
-      if (!params?.id || !user) return
+      if (!params?.id || !user) return;
 
       try {
-        const { hackathonOperations } = await import('@/lib/supabase')
-        const result = await hackathonOperations.getHackathonDetails(params.id as string)
-        
+        const { hackathonOperations, supabase } = await import(
+          "@/lib/supabase"
+        );
+
+        // ハッカソンの基本情報を取得
+        const result = await hackathonOperations.getHackathonDetails(
+          params.id as string
+        );
+
         if (result.success && result.data) {
-          setHackathon(result.data)
-        } else {
-          // フォールバック: ローカルストレージから読み込み
-          const saved = localStorage.getItem('hackscoreai_hackathons')
+          setHackathon(result.data);
+        }
+
+        // 評価サマリーを取得（順位表示用）
+        const { data: evaluationSummary, error } = await supabase.rpc(
+          "get_evaluation_summary",
+          {
+            p_user_id: user.id,
+          }
+        );
+
+        if (evaluationSummary && !error) {
+          // 現在のジョブに関連するリポジトリの評価結果をフィルタリング
+          const currentJobEvaluations = evaluationSummary.filter(
+            (evaluation: any) => evaluation.job_id === params.id
+          );
+
+          // スコア順に並び替え（降順）
+          const sortedEvaluations = currentJobEvaluations.sort(
+            (a: any, b: any) => b.total_score - a.total_score
+          );
+
+          setRepositoryEvaluations(sortedEvaluations);
+
+          // ハッカソンデータが取得できている場合、全リポジトリの状態を構築
+          if (result.success && result.data) {
+            const allRepositories = result.data.repositories;
+            const repositoryStatusList: RepositoryStatus[] = [];
+
+            // 評価完了済みリポジトリを追加
+            sortedEvaluations.forEach((evaluation: any, index: number) => {
+              repositoryStatusList.push({
+                repository_name: evaluation.repository_name,
+                status: "completed",
+                evaluation: evaluation,
+                rank: index + 1,
+              });
+            });
+
+            // 評価中のリポジトリを追加
+            allRepositories.forEach((repoName: string) => {
+              const isCompleted = sortedEvaluations.some(
+                (evaluation: any) => evaluation.repository_name === repoName
+              );
+              if (!isCompleted) {
+                repositoryStatusList.push({
+                  repository_name: repoName,
+                  status: "evaluating",
+                });
+              }
+            });
+
+            setRepositoryStatuses(repositoryStatusList);
+          }
+        }
+
+        // フォールバック: ローカルストレージから読み込み
+        if (!result.success) {
+          const saved = localStorage.getItem("hackscoreai_hackathons");
           if (saved) {
-            const hackathons = JSON.parse(saved) as HackathonDetails[]
-            const found = hackathons.find((h: HackathonDetails) => h.id === params.id)
+            const hackathons = JSON.parse(saved) as HackathonDetails[];
+            const found = hackathons.find(
+              (h: HackathonDetails) => h.id === params.id
+            );
             if (found) {
-              setHackathon(found)
+              setHackathon(found);
             }
           }
         }
       } catch (error) {
-        console.error('Error loading hackathon details:', error)
+        console.error("Error loading hackathon details:", error);
       } finally {
-        setIsLoading(false)
+        setIsLoading(false);
       }
-    }
+    };
 
-    loadHackathonDetails()
-  }, [params?.id, user])
+    loadHackathonDetails();
+  }, [params?.id, user]);
 
   if (loading || isLoading) {
     return (
@@ -85,39 +183,88 @@ export default function HackathonDetailPage() {
           <div className="text-muted-foreground">Loading...</div>
         </div>
       </div>
-    )
+    );
   }
 
   if (!user || !hackathon) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center space-y-4">
-          <div className="text-muted-foreground">ハッカソンが見つかりません</div>
-          <Button onClick={() => router.push('/dashboard')}>
+          <div className="text-muted-foreground">
+            ハッカソンが見つかりません
+          </div>
+          <Button onClick={() => router.push("/dashboard")}>
             ダッシュボードに戻る
           </Button>
         </div>
       </div>
-    )
+    );
   }
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'completed': return 'text-green-500'
-      case 'analyzing': return 'text-yellow-500'
-      case 'failed': return 'text-red-500'
-      default: return 'text-gray-500'
+      case "completed":
+        return "text-green-500";
+      case "analyzing":
+        return "text-yellow-500";
+      case "failed":
+        return "text-red-500";
+      default:
+        return "text-gray-500";
     }
-  }
+  };
 
   const getStatusText = (status: string) => {
     switch (status) {
-      case 'completed': return '評価完了'
-      case 'analyzing': return '分析中'
-      case 'failed': return '評価失敗'
-      default: return '待機中'
+      case "completed":
+        return "評価完了";
+      case "analyzing":
+        return "分析中";
+      case "failed":
+        return "評価失敗";
+      default:
+        return "待機中";
     }
-  }
+  };
+
+  const getRankIcon = (rank: number) => {
+    switch (rank) {
+      case 1:
+        return <Crown className="w-6 h-6 text-yellow-500" />;
+      case 2:
+        return <Medal className="w-6 h-6 text-gray-400" />;
+      case 3:
+        return <Medal className="w-6 h-6 text-amber-600" />;
+      default:
+        return (
+          <div className="w-6 h-6 flex items-center justify-center text-sm font-bold text-muted-foreground">
+            #{rank}
+          </div>
+        );
+    }
+  };
+
+  const navigateToRepositoryDetail = (
+    repoName: string,
+    evaluationId: string
+  ) => {
+    router.push(
+      `/hackathon/${params.id}/repository/${encodeURIComponent(
+        repoName
+      )}?evaluationId=${evaluationId}`
+    );
+  };
+
+  // 平均スコアを計算
+  const averageScore =
+    repositoryEvaluations.length > 0
+      ? Math.round(
+          repositoryEvaluations.reduce(
+            (sum, repo) => sum + repo.total_score,
+            0
+          ) / repositoryEvaluations.length
+        )
+      : null;
 
   return (
     <div className="min-h-screen bg-background relative">
@@ -126,11 +273,7 @@ export default function HackathonDetailPage() {
       <header className="border-b border-border bg-card relative z-10">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center gap-4">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => router.back()}
-            >
+            <Button variant="outline" size="sm" onClick={() => router.back()}>
               <ArrowLeft className="w-4 h-4" />
             </Button>
             <div className="flex items-center gap-4">
@@ -164,79 +307,165 @@ export default function HackathonDetailPage() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="text-center">
                   <div className="text-2xl font-bold text-foreground">
-                    {hackathon.score || '-'}
+                    {averageScore || hackathon.score || "-"}
                   </div>
-                  <div className="text-sm text-muted-foreground">総合スコア</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-foreground">
-                    {hackathon.rank ? `#${hackathon.rank}` : '-'}
+                  <div className="text-sm text-muted-foreground">
+                    平均総合スコア
                   </div>
-                  <div className="text-sm text-muted-foreground">順位</div>
                 </div>
                 <div className="text-center">
                   <div className="text-2xl font-bold text-foreground">
                     {hackathon.repositories.length}
                   </div>
-                  <div className="text-sm text-muted-foreground">リポジトリ数</div>
+                  <div className="text-sm text-muted-foreground">
+                    リポジトリ数
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-foreground">
+                    {repositoryEvaluations.length}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    評価完了数
+                  </div>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                 <div className="flex items-center gap-2">
                   <Calendar className="w-4 h-4 text-muted-foreground" />
-                  <span>開始日: {new Date(hackathon.createdAt).toLocaleString()}</span>
+                  <span>
+                    開始日: {new Date(hackathon.createdAt).toLocaleString()}
+                  </span>
                 </div>
                 {hackathon.completedAt && (
                   <div className="flex items-center gap-2">
                     <Clock className="w-4 h-4 text-muted-foreground" />
-                    <span>完了日: {new Date(hackathon.completedAt).toLocaleString()}</span>
+                    <span>
+                      完了日: {new Date(hackathon.completedAt).toLocaleString()}
+                    </span>
                   </div>
                 )}
               </div>
             </CardContent>
           </Card>
 
-          {/* リポジトリ一覧 */}
+          {/* リポジトリ一覧（順位付き） */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Code className="w-5 h-5 text-primary" />
-                対象リポジトリ
+                <Trophy className="w-5 h-5 text-primary" />
+                リポジトリ順位
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid gap-3">
-                {hackathon.repositories.map((repo, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center gap-3 p-3 border border-border rounded-lg"
-                  >
-                    <GitBranch className="w-4 h-4 text-muted-foreground" />
-                    <span className="font-medium flex-1">{repo}</span>
-                    {hackathon.results?.repositoryScores && (
-                      <div className="text-right">
-                        <div className="font-bold text-primary">
-                          {hackathon.results.repositoryScores.find(r => r.repository === repo)?.score || '-'}
+                {repositoryStatuses.length > 0
+                  ? repositoryStatuses.map((repoStatus, index) => {
+                      const isCompleted = repoStatus.status === "completed";
+                      const isClickable = isCompleted && repoStatus.evaluation;
+
+                      return (
+                        <div
+                          key={repoStatus.repository_name}
+                          className={`flex items-center gap-4 p-4 border border-border rounded-lg transition-colors ${
+                            isClickable
+                              ? "hover:bg-accent/50 cursor-pointer"
+                              : ""
+                          } ${
+                            !isCompleted
+                              ? "bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800"
+                              : ""
+                          }`}
+                          onClick={() => {
+                            if (isClickable && repoStatus.evaluation) {
+                              navigateToRepositoryDetail(
+                                repoStatus.repository_name,
+                                repoStatus.evaluation.id
+                              );
+                            }
+                          }}
+                        >
+                          <div className="flex items-center gap-3">
+                            {isCompleted && repoStatus.rank ? (
+                              <>
+                                {getRankIcon(repoStatus.rank)}
+                                <div className="text-lg font-bold text-muted-foreground">
+                                  #{repoStatus.rank}
+                                </div>
+                              </>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <Loader2 className="w-5 h-5 animate-spin text-yellow-600" />
+                                <div className="text-lg font-bold text-yellow-600">
+                                  評価中
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          <GitBranch className="w-4 h-4 text-muted-foreground" />
+                          <div className="flex-1">
+                            <div className="font-medium text-lg">
+                              {repoStatus.repository_name}
+                            </div>
+                            {!isCompleted && (
+                              <div className="text-sm text-yellow-600 dark:text-yellow-400">
+                                AIエージェントによる解析を実行中...
+                              </div>
+                            )}
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.open(
+                                `https://github.com/${repoStatus.repository_name}`,
+                                "_blank"
+                              );
+                            }}
+                          >
+                            <ExternalLink className="w-4 h-4" />
+                          </Button>
                         </div>
-                        <div className="text-xs text-muted-foreground">スコア</div>
+                      );
+                    })
+                  : // データがない場合のフォールバック
+                    hackathon?.repositories.map((repo, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center gap-4 p-4 border border-border rounded-lg bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="w-5 h-5 animate-spin text-yellow-600" />
+                          <div className="text-lg font-bold text-yellow-600">
+                            評価中
+                          </div>
+                        </div>
+                        <GitBranch className="w-4 h-4 text-muted-foreground" />
+                        <div className="flex-1">
+                          <div className="font-medium text-lg">{repo}</div>
+                          <div className="text-sm text-yellow-600 dark:text-yellow-400">
+                            Claude Codeによる解析を実行中...
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            window.open(`https://github.com/${repo}`, "_blank")
+                          }
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </Button>
                       </div>
-                    )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => window.open(`https://github.com/${repo}`, '_blank')}
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ))}
+                    )) || []}
               </div>
             </CardContent>
           </Card>
 
           {/* 分析中の場合 */}
-          {hackathon.status === 'analyzing' && (
+          {hackathon.status === "analyzing" && (
             <Card className="border-yellow-500/20 bg-yellow-500/10">
               <CardContent className="pt-6">
                 <div className="text-center space-y-4">
@@ -252,90 +481,8 @@ export default function HackathonDetailPage() {
             </Card>
           )}
 
-          {/* 評価結果 */}
-          {hackathon.status === 'completed' && hackathon.results && (
-            <>
-              <Card>
-                <CardHeader>
-                  <CardTitle>総合評価</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-foreground leading-relaxed">
-                    {hackathon.results.overview}
-                  </p>
-                </CardContent>
-              </Card>
-
-              <div className="grid gap-6 md:grid-cols-2">
-                <Card className="border-green-500/20 bg-green-500/10">
-                  <CardHeader>
-                    <CardTitle className="text-green-700 dark:text-green-300">
-                      ✨ 優れている点
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ul className="space-y-2">
-                      {hackathon.results.strengths.map((strength, index) => (
-                        <li key={index} className="flex items-start gap-2">
-                          <Star className="w-4 h-4 text-green-500 mt-1 flex-shrink-0" />
-                          <span className="text-green-700 dark:text-green-300">
-                            {strength}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </CardContent>
-                </Card>
-
-                <Card className="border-blue-500/20 bg-blue-500/10">
-                  <CardHeader>
-                    <CardTitle className="text-blue-700 dark:text-blue-300">
-                      🚀 改善提案
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ul className="space-y-2">
-                      {hackathon.results.improvements.map((improvement, index) => (
-                        <li key={index} className="flex items-start gap-2">
-                          <span className="w-4 h-4 text-blue-500 mt-1 flex-shrink-0">•</span>
-                          <span className="text-blue-700 dark:text-blue-300">
-                            {improvement}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* リポジトリ別詳細分析 */}
-              {hackathon.results.repositoryScores && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>リポジトリ別詳細分析</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {hackathon.results.repositoryScores.map((repoScore, index) => (
-                      <div key={index} className="border border-border rounded-lg p-4">
-                        <div className="flex items-center justify-between mb-3">
-                          <h4 className="font-medium">{repoScore.repository}</h4>
-                          <div className="text-xl font-bold text-primary">
-                            {repoScore.score}点
-                          </div>
-                        </div>
-                        <p className="text-sm text-muted-foreground leading-relaxed">
-                          {repoScore.analysis}
-                        </p>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              )}
-            </>
-          )}
-
           {/* エラーの場合 */}
-          {hackathon.status === 'failed' && (
+          {hackathon.status === "failed" && (
             <Card className="border-red-500/20 bg-red-500/10">
               <CardContent className="pt-6">
                 <div className="text-center space-y-4">
@@ -347,7 +494,7 @@ export default function HackathonDetailPage() {
                   </div>
                   <Button
                     variant="outline"
-                    onClick={() => router.push('/settings')}
+                    onClick={() => router.push("/settings")}
                   >
                     設定を確認
                   </Button>
@@ -358,5 +505,5 @@ export default function HackathonDetailPage() {
         </div>
       </main>
     </div>
-  )
+  );
 }
