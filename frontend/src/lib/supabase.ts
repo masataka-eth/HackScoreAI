@@ -145,14 +145,106 @@ export const hackathonOperations = {
   },
 
   // ハッカソン詳細を取得
-  async getHackathonDetails(evaluationId: string) {
+  async getHackathonDetails(jobId: string) {
     try {
-      const { data, error } = await supabase.rpc('get_evaluation_details', {
-        p_evaluation_id: evaluationId
-      })
+      // ジョブの基本情報を取得
+      const { data: jobData, error: jobError } = await supabase
+        .from('job_status')
+        .select('id, payload, status, created_at, updated_at')
+        .eq('id', jobId)
+        .single()
 
-      if (error) throw error
-      return { success: true, data }
+      if (jobError) throw jobError
+
+      if (!jobData) {
+        return { success: false, error: 'ハッカソンが見つかりません' }
+      }
+
+      // 関連する評価結果を取得
+      const { data: evaluationResults, error: evalError } = await supabase
+        .from('evaluation_results')
+        .select(`
+          id,
+          repository_name,
+          total_score,
+          evaluation_data,
+          processing_metadata,
+          created_at,
+          evaluation_items (
+            item_id,
+            name,
+            score,
+            max_score,
+            positives,
+            negatives
+          )
+        `)
+        .eq('job_id', jobId)
+
+      if (evalError) console.warn('Error loading evaluation results:', evalError)
+
+      // データを詳細ページ用の形式に変換
+      const payload = jobData.payload
+      const repositories = payload?.repositories || []
+      const hackathonName = payload?.evaluationCriteria?.hackathonName || `ハッカソン ${new Date(jobData.created_at).toLocaleDateString()}`
+
+      // 評価結果がある場合の処理
+      let results = null
+      let averageScore = null
+      let completedAt = null
+
+      if (evaluationResults && evaluationResults.length > 0) {
+        // 平均スコアを計算
+        averageScore = Math.round(
+          evaluationResults.reduce((sum, result) => sum + result.total_score, 0) / evaluationResults.length
+        )
+
+        completedAt = evaluationResults[0]?.created_at
+
+        // 評価結果のサマリーを作成
+        const allPositives: string[] = []
+        const allNegatives: string[] = []
+        
+        evaluationResults.forEach(result => {
+          if (result.evaluation_items) {
+            result.evaluation_items.forEach((item: any) => {
+              if (item.positives) allPositives.push(item.positives)
+              if (item.negatives) allNegatives.push(item.negatives)
+            })
+          }
+        })
+
+        results = {
+          overview: `${repositories.length}個のリポジトリを分析し、総合スコア${averageScore}点を獲得しました。`,
+          strengths: allPositives.slice(0, 5), // 上位5つの強み
+          improvements: allNegatives.slice(0, 5), // 上位5つの改善点
+          repositoryScores: evaluationResults.map(result => ({
+            repository: result.repository_name,
+            score: result.total_score,
+            analysis: result.evaluation_data?.overallComment || 
+                     result.evaluation_data?.summary || 
+                     '分析結果が利用できません'
+          }))
+        }
+      }
+
+      // 最終的なハッカソン詳細オブジェクト
+      const hackathonDetails = {
+        id: jobData.id,
+        name: hackathonName,
+        repositories,
+        status: evaluationResults && evaluationResults.length === repositories.length ? 'completed' :
+                jobData.status === 'failed' ? 'failed' :
+                jobData.status === 'processing' ? 'analyzing' : 'pending',
+        score: averageScore,
+        rank: 1, // 今後ランキング機能を実装
+        totalParticipants: 1, // 今後参加者数機能を実装
+        createdAt: jobData.created_at,
+        completedAt,
+        results
+      }
+
+      return { success: true, data: hackathonDetails }
     } catch (error) {
       console.error('Error getting hackathon details:', error)
       return { success: false, error }

@@ -225,7 +225,23 @@ export default function NewHackathonPage() {
       })
 
       if (result.success) {
-        alert('ハッカソンを登録し、評価を開始しました！')
+        // ハッカソン登録成功後、自動的に評価処理を開始
+        console.log('✅ Hackathon registered successfully, starting evaluation automatically...')
+        
+        try {
+          const workerResult = await hackathonOperations.triggerWorkerProcessing()
+          if (workerResult.success) {
+            console.log('✅ Evaluation started automatically')
+            alert('ハッカソンを登録し、評価を開始しました！\n\nダッシュボードで進行状況を確認できます。評価には数分かかる場合があります。')
+          } else {
+            console.warn('⚠️ Automatic evaluation start failed, but hackathon was registered')
+            alert('ハッカソンを登録しました。評価はダッシュボードから手動で開始してください。')
+          }
+        } catch (workerError) {
+          console.error('⚠️ Auto-worker trigger failed:', workerError)
+          alert('ハッカソンを登録しました。評価はダッシュボードから手動で開始してください。')
+        }
+        
         router.push('/dashboard')
       } else {
         console.error('Hackathon creation failed:', result)

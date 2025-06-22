@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArrowLeft, Clock, Code, Trophy, Star, GitBranch, Calendar, ExternalLink } from "lucide-react"
 import { OctocatCharacter } from "@/components/octocat-character"
+import { BinaryBackground } from "@/components/binary-background"
 
 interface HackathonDetails {
   id: string
@@ -119,9 +120,10 @@ export default function HackathonDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background relative">
+      <BinaryBackground />
       {/* ヘッダー */}
-      <header className="border-b border-border bg-card">
+      <header className="border-b border-border bg-card relative z-10">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center gap-4">
             <Button
@@ -148,7 +150,7 @@ export default function HackathonDetailPage() {
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8 max-w-4xl">
+      <main className="container mx-auto px-4 py-8 max-w-4xl relative z-10">
         <div className="space-y-6">
           {/* 概要カード */}
           <Card>

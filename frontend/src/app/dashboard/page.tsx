@@ -134,19 +134,27 @@ export default function DashboardPage() {
             </div>
             
             <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={triggerProcessing}
-                disabled={isProcessing}
-                title="保留中のジョブを手動で処理開始"
-              >
-                {isProcessing ? (
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
-                ) : (
-                  <Play className="w-4 h-4" />
-                )}
-              </Button>
+              {/* 開発者モード: Shift+Ctrl+クリックで手動開始ボタンを表示 */}
+              {process.env.NODE_ENV === 'development' && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(e) => {
+                    if (e.shiftKey && e.ctrlKey) {
+                      triggerProcessing()
+                    }
+                  }}
+                  disabled={isProcessing}
+                  title="開発者モード: Shift+Ctrl+クリックで手動処理開始"
+                  className="opacity-30 hover:opacity-100"
+                >
+                  {isProcessing ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                  ) : (
+                    <Play className="w-4 h-4" />
+                  )}
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -173,7 +181,16 @@ export default function DashboardPage() {
 
         {/* ハッカソン一覧 */}
         <div className="space-y-6">
-          <h2 className="text-xl font-semibold">ハッカソン履歴</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold">ハッカソン履歴</h2>
+            <Button
+              onClick={() => router.push('/hackathon/new')}
+              className="flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              新しいハッカソン
+            </Button>
+          </div>
           
           {isLoading ? (
             <div className="text-center py-12">
@@ -200,7 +217,7 @@ export default function DashboardPage() {
                 >
                   <div className="flex items-start justify-between mb-4">
                     <div>
-                      <h3 className="text-lg font-semibold mb-2">
+                      <h3 className="text-lg font-semibold mb-2 text-foreground">
                         {hackathon.name}
                       </h3>
                       <div className="flex items-center gap-4 text-sm text-muted-foreground">
