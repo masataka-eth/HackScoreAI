@@ -101,12 +101,33 @@ serve(async (req) => {
         .eq('queue_message_id', message.msg_id)
 
       try {
-        // Get user secrets from vault
-        const userId = message.message.userId || '11111111-1111-1111-1111-111111111111' // Test user for now
-        const secrets = await getUserSecrets(supabase, userId)
+        // Forward job to Cloud Run worker (without secrets) - Fire and forget
+        console.log('🚀 Starting Cloud Run processing (async)')
         
-        // Process repositories with secrets
-        const result = await processRepositories(message.message, secrets)
+        // Start processing in Cloud Run (don't await)
+        forwardToCloudRunWorker({
+          ...message.message,
+          // Don't send secrets over HTTP - Cloud Run will fetch them directly
+          requiresSecrets: true
+        }).catch(error => {
+          console.error('❌ Cloud Run processing failed:', error)
+          // Update job status to failed
+          supabase
+            .from('job_status')
+            .update({ 
+              status: 'failed',
+              error: error.message,
+              updated_at: new Date().toISOString()
+            })
+            .eq('queue_message_id', message.msg_id)
+        })
+        
+        // Immediately return success and delete from queue
+        const result = {
+          success: true,
+          message: 'Job forwarded to Cloud Run worker',
+          cloudRunProcessing: true
+        }
 
         // Update job status to completed
         await supabase
@@ -184,71 +205,35 @@ serve(async (req) => {
   )
 })
 
-// Get user secrets from vault
-async function getUserSecrets(supabase: any, userId: string) {
-  const secrets: { [key: string]: string | null } = {}
+// Forward job to Cloud Run worker
+async function forwardToCloudRunWorker(jobPayload: any) {
+  const cloudRunUrl = Deno.env.get('CLOUD_RUN_WORKER_URL') || 'http://host.docker.internal:8080'
+  const authToken = Deno.env.get('CLOUD_RUN_AUTH_TOKEN') || ''
+  
+  console.log('🚀 Forwarding job to Cloud Run worker:', cloudRunUrl)
+  console.log('🔑 Auth token available:', authToken ? 'Yes' : 'No')
+  console.log('📦 Payload:', JSON.stringify(jobPayload, null, 2))
   
   try {
-    // Get Anthropic API key
-    const { data: anthropicKey, error: anthropicError } = await supabase.rpc('get_secret_for_job', {
-      p_user_id: userId,
-      p_secret_type: 'anthropic_key'
+    const response = await fetch(`${cloudRunUrl}/process`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+      },
+      body: JSON.stringify(jobPayload)
     })
-    
-    if (!anthropicError) {
-      secrets.anthropicKey = anthropicKey
-    }
-    
-    // Get GitHub token
-    const { data: githubToken, error: githubError } = await supabase.rpc('get_secret_for_job', {
-      p_user_id: userId,
-      p_secret_type: 'github_token'
-    })
-    
-    if (!githubError) {
-      secrets.githubToken = githubToken
-    }
-    
-    console.log('Retrieved secrets:', {
-      anthropicKey: secrets.anthropicKey ? 'Found' : 'Not found',
-      githubToken: secrets.githubToken ? 'Found' : 'Not found'
-    })
-    
-  } catch (error) {
-    console.error('Error getting secrets:', error)
-  }
   
-  return secrets
+    if (!response.ok) {
+      throw new Error(`Cloud Run worker failed: ${response.status} ${response.statusText}`)
+    }
+    
+    return await response.json()
+  } catch (error) {
+    console.error('❌ Fetch error details:', error)
+    console.error('❌ Cloud Run URL:', cloudRunUrl)
+    console.error('❌ Auth token length:', authToken.length)
+    throw error
+  }
 }
 
-// Process repositories (placeholder for now)
-async function processRepositories(payload: any, secrets: { [key: string]: string | null } = {}) {
-  console.log('Processing repositories:', payload.repositories)
-  
-  // Simulate some processing time
-  await new Promise(resolve => setTimeout(resolve, 2000))
-  
-  // Return mock result with secrets info
-  return {
-    processedAt: new Date().toISOString(),
-    repositories: payload.repositories.map((repo: string) => ({
-      name: repo,
-      score: Math.floor(Math.random() * 100),
-      analysis: {
-        codeQuality: Math.floor(Math.random() * 100),
-        documentation: Math.floor(Math.random() * 100),
-        innovation: Math.floor(Math.random() * 100),
-        complexity: Math.floor(Math.random() * 100)
-      }
-    })),
-    totalScore: Math.floor(Math.random() * 100),
-    evaluationCriteria: payload.evaluationCriteria,
-    requestId: payload.requestId,
-    vaultInfo: {
-      anthropicKeyAvailable: !!secrets.anthropicKey,
-      githubTokenAvailable: !!secrets.githubToken,
-      anthropicKeyPreview: secrets.anthropicKey ? secrets.anthropicKey.substring(0, 10) + '...' : null,
-      githubTokenPreview: secrets.githubToken ? secrets.githubToken.substring(0, 10) + '...' : null
-    }
-  }
-}

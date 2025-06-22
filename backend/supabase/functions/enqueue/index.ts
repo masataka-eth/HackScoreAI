@@ -50,15 +50,20 @@ serve(async (req) => {
       // Prepare job payload
       const jobPayload = {
         repositories: body.repositories,
+        userId: body.userId || '11111111-1111-1111-1111-111111111111', // Default test user
         evaluationCriteria: body.evaluationCriteria || {},
         timestamp: new Date().toISOString(),
         requestId: crypto.randomUUID()
       }
 
-      // Send message to pgmq queue
+      // Generate jobId first
+      const jobId = crypto.randomUUID()
+      const finalPayload = { ...jobPayload, jobId }
+
+      // Send message to pgmq queue with jobId
       const { data: queueResult, error: queueError } = await supabase.rpc('pgmq_send', {
         queue_name: 'repo_analysis_queue',
-        message: jobPayload
+        message: finalPayload
       })
 
       if (queueError) {
@@ -76,9 +81,10 @@ serve(async (req) => {
       const { data: jobStatus, error: jobError } = await supabase
         .from('job_status')
         .insert({
+          id: jobId,
           queue_message_id: queueResult,
           status: 'queued',
-          payload: jobPayload
+          payload: finalPayload
         })
         .select()
         .single()

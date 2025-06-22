@@ -1,14 +1,16 @@
-# HackScoreAI Backend - 【backend_1】【backend_2】実装
+# HackScoreAI Backend - 【backend_1】〜【backend_4】実装
 
 ## 概要
-Supabase の Queues にジョブを投入し、Edge Worker で処理する仕組み + Vault からのキー取得機能の実装です。
+GitHub リポジトリを ClaudeCode で解析し、ハッカソン評価基準に基づくスコアを自動生成するバックエンドシステムです。
 
 ## 構成
-- **enqueue**: ジョブをキューに投入するEdge Function (Hono)
-- **repo_worker**: キューからジョブを取り出して処理するEdge Worker (Hono)
+- **enqueue**: ジョブをキューに投入するEdge Function
+- **repo_worker**: ClaudeCode実行とリポジトリ解析を行うEdge Worker
 - **vault_test**: Vault機能のテスト用Edge Function
-- **pgmq**: PostgreSQLベースのメッセージキュー
-- **Vault**: 暗号化されたAPIキー・トークン管理
+- **pgmq**: PostgreSQLベースのメッセージキューシステム
+- **Vault**: AnthropicキーとGitHubトークンの暗号化管理
+- **ClaudeCode SDK**: リポジトリ解析とハッカソン評価の実行
+- **評価結果DB**: JSON評価結果の構造化保存
 
 ## セットアップ手順
 
@@ -40,6 +42,30 @@ node test-queue.js
 ### 【backend_2】Vaultテスト
 ```bash
 node test-vault.js
+```
+
+### 【backend_3】【backend_4】実際のAPIキー登録
+```bash
+# 対話式でAPIキーを登録
+node register-keys.js
+
+# または手動でAPIキーを登録
+curl -X POST "http://localhost:54321/functions/v1/vault_test" \
+  -H "Authorization: Bearer [ANON_KEY]" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "store",
+    "userId": "11111111-1111-1111-1111-111111111111",
+    "secretType": "anthropic_key",
+    "secretName": "production",
+    "secretValue": "sk-ant-api03-YOUR-ACTUAL-KEY"
+  }'
+```
+
+### 【backend_3】【backend_4】完全パイプラインテスト
+```bash
+# 実際のAPI呼び出しを含むテスト（料金が発生します）
+node test-full-pipeline.js --confirm
 ```
 
 #### キューテストの内容：
@@ -125,6 +151,17 @@ curl -X POST http://localhost:54321/functions/v1/repo_worker/process \
 - Edge WorkerからのVaultキー取得
 - 暗号化・復号化の完全テスト
 
-## 次のステップ
-- 【backend_3】実際に ClaudeCode を動かす
-- 【backend_4】結果をデータベースに保存する（JSON を検知したら Supabase データベースに保存とする）
+### 【backend_3】✅ 完了
+- ClaudeCode SDKの実装（参考ソースを基に）
+- Edge WorkerでのClaudeCode実行統合
+- GitHub MCPを使用したリポジトリ解析
+- ハッカソン評価基準による採点
+
+### 【backend_4】✅ 完了
+- 評価結果JSONの自動検知
+- evaluation_resultsテーブルへの構造化保存
+- evaluation_itemsテーブルでの詳細評価項目管理
+- SQLクエリ関数による結果取得
+
+## 🎉 全機能実装完了
+バックエンドの全ての要件が実装され、テスト可能な状態です。
