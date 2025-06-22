@@ -291,8 +291,9 @@ inspector_port = 8083
 # The Deno major version to use.
 deno_version = 1
 
-# [edge_runtime.secrets]
-# secret_key = "env(SECRET_VALUE)"
+[edge_runtime.secrets]
+CLOUD_RUN_WORKER_URL = "env(CLOUD_RUN_WORKER_URL)"
+CLOUD_RUN_AUTH_TOKEN = "env(CLOUD_RUN_AUTH_TOKEN)"
 
 [analytics]
 enabled = true

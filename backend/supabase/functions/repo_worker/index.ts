@@ -101,12 +101,33 @@ serve(async (req) => {
         .eq('queue_message_id', message.msg_id)
 
       try {
-        // Forward job to Cloud Run worker (without secrets)
-        const result = await forwardToCloudRunWorker({
+        // Forward job to Cloud Run worker (without secrets) - Fire and forget
+        console.log('🚀 Starting Cloud Run processing (async)')
+        
+        // Start processing in Cloud Run (don't await)
+        forwardToCloudRunWorker({
           ...message.message,
           // Don't send secrets over HTTP - Cloud Run will fetch them directly
           requiresSecrets: true
+        }).catch(error => {
+          console.error('❌ Cloud Run processing failed:', error)
+          // Update job status to failed
+          supabase
+            .from('job_status')
+            .update({ 
+              status: 'failed',
+              error: error.message,
+              updated_at: new Date().toISOString()
+            })
+            .eq('queue_message_id', message.msg_id)
         })
+        
+        // Immediately return success and delete from queue
+        const result = {
+          success: true,
+          message: 'Job forwarded to Cloud Run worker',
+          cloudRunProcessing: true
+        }
 
         // Update job status to completed
         await supabase
@@ -186,24 +207,35 @@ serve(async (req) => {
 
 // Forward job to Cloud Run worker
 async function forwardToCloudRunWorker(jobPayload: any) {
-  const cloudRunUrl = Deno.env.get('CLOUD_RUN_WORKER_URL') || 'http://localhost:8080'
+  // Hardcode for now - environment variables not loading properly
+  const cloudRunUrl = 'http://host.docker.internal:8080'
+  const authToken = 'F24B2438-E1DC-477A-ADE2-BA97E19B64B1'
   
   console.log('🚀 Forwarding job to Cloud Run worker:', cloudRunUrl)
+  console.log('🔑 Auth token available:', authToken ? 'Yes' : 'No')
+  console.log('📦 Payload:', JSON.stringify(jobPayload, null, 2))
   
-  const response = await fetch(`${cloudRunUrl}/process`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${Deno.env.get('CLOUD_RUN_AUTH_TOKEN') || ''}`
-    },
-    body: JSON.stringify(jobPayload)
-  })
+  try {
+    const response = await fetch(`${cloudRunUrl}/process`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+      },
+      body: JSON.stringify(jobPayload)
+    })
   
-  if (!response.ok) {
-    throw new Error(`Cloud Run worker failed: ${response.status} ${response.statusText}`)
+    if (!response.ok) {
+      throw new Error(`Cloud Run worker failed: ${response.status} ${response.statusText}`)
+    }
+    
+    return await response.json()
+  } catch (error) {
+    console.error('❌ Fetch error details:', error)
+    console.error('❌ Cloud Run URL:', cloudRunUrl)
+    console.error('❌ Auth token length:', authToken.length)
+    throw error
   }
-  
-  return await response.json()
 }
 
 // Get user secrets from vault
