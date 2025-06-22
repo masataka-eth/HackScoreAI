@@ -35,20 +35,20 @@ serve(async (req: Request) => {
     }
 
     // Parse request body
-    const { hackathonId, repositoryName } = await req.json();
+    const { jobId, repositoryName } = await req.json();
 
-    if (!hackathonId || !repositoryName) {
+    if (!jobId || !repositoryName) {
       return new Response(
-        JSON.stringify({ error: "hackathonId and repositoryName are required" }),
+        JSON.stringify({ error: "jobId and repositoryName are required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`🗑️ Removing repository ${repositoryName} from hackathon ${hackathonId} for user ${user.id}`);
+    console.log(`🗑️ Removing repository ${repositoryName} from hackathon ${jobId} for user ${user.id}`);
 
     // Remove repository using database function
-    const { data: success, error: removeError } = await supabase.rpc("remove_repository_from_hackathon", {
-      p_hackathon_id: hackathonId,
+    const { data, error: removeError } = await supabase.rpc("remove_repository_from_hackathon", {
+      p_hackathon_id: jobId,
       p_repository_name: repositoryName,
       p_user_id: user.id,
     });
@@ -61,21 +61,14 @@ serve(async (req: Request) => {
       );
     }
 
-    if (!success) {
-      return new Response(
-        JSON.stringify({ error: "Repository removal failed" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    console.log(`✅ Repository removed successfully`);
+    console.log(`✅ Repository removed successfully: ${JSON.stringify(data)}`);
 
     return new Response(
       JSON.stringify({
-        success: true,
-        hackathonId,
-        repositoryName,
+        success: data,
         message: "Repository removed successfully",
+        jobId,
+        repositoryName,
       }),
       {
         status: 200,

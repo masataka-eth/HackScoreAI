@@ -6,6 +6,18 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
   ArrowLeft,
   Clock,
   Trophy,
@@ -15,6 +27,9 @@ import {
   Medal,
   Crown,
   Loader2,
+  Plus,
+  Trash2,
+  RefreshCw,
 } from "lucide-react";
 import { OctocatCharacter } from "@/components/octocat-character";
 import { BinaryBackground } from "@/components/binary-background";
@@ -70,6 +85,14 @@ export default function HackathonDetailPage() {
     RepositoryStatus[]
   >([]);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // リポジトリ追加関連のstate
+  const [isAddRepositoryOpen, setIsAddRepositoryOpen] = useState(false);
+  const [githubOrg, setGithubOrg] = useState("");
+  const [availableRepos, setAvailableRepos] = useState<string[]>([]);
+  const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
+  const [isLoadingRepos, setIsLoadingRepos] = useState(false);
+  const [isAddingRepositories, setIsAddingRepositories] = useState(false);
 
   useEffect(() => {
     if (loading) return;
@@ -172,6 +195,136 @@ export default function HackathonDetailPage() {
 
     loadHackathonDetails();
   }, [params?.id, user]);
+
+  // GitHubリポジトリ一覧を取得
+  const loadGitHubRepositories = async () => {
+    if (!githubOrg.trim()) return;
+    
+    setIsLoadingRepos(true);
+    try {
+      const { vaultOperations } = await import("@/lib/supabase");
+      const result = await vaultOperations.getKey(user!.id, "github_token");
+      
+      if (!result.success || !result.data) {
+        alert("GitHubトークンが設定されていません。設定ページで設定してください。");
+        return;
+      }
+
+      const response = await fetch(`https://api.github.com/orgs/${githubOrg}/repos?type=all&per_page=100`, {
+        headers: {
+          Authorization: `Bearer ${result.data}`,
+          Accept: "application/vnd.github.v3+json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`GitHub API エラー: ${response.status}`);
+      }
+
+      const repos = await response.json();
+      const repoNames = repos.map((repo: any) => repo.full_name);
+      
+      // 既存のリポジトリを除外
+      const existingRepos = hackathon?.repositories || [];
+      const newRepos = repoNames.filter((repo: string) => !existingRepos.includes(repo));
+      
+      setAvailableRepos(newRepos);
+    } catch (error) {
+      console.error("Error loading repositories:", error);
+      alert("リポジトリの取得に失敗しました");
+    } finally {
+      setIsLoadingRepos(false);
+    }
+  };
+
+  // リポジトリを追加
+  const handleAddRepositories = async () => {
+    if (selectedRepos.length === 0) return;
+    
+    setIsAddingRepositories(true);
+    try {
+      const { hackathonOperations } = await import("@/lib/supabase");
+      
+      // 選択されたリポジトリを順番に追加
+      for (const repo of selectedRepos) {
+        const result = await hackathonOperations.addRepositoryToHackathon(
+          params.id as string,
+          repo
+        );
+        
+        if (!result.success) {
+          console.error(`Failed to add repository ${repo}:`, result.error);
+          alert(`リポジトリ ${repo} の追加に失敗しました`);
+        }
+      }
+      
+      // モーダルを閉じて状態をリセット
+      setIsAddRepositoryOpen(false);
+      setGithubOrg("");
+      setAvailableRepos([]);
+      setSelectedRepos([]);
+      
+      // ハッカソン詳細を再読み込み
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+      
+    } catch (error) {
+      console.error("Error adding repositories:", error);
+      alert("リポジトリの追加に失敗しました");
+    } finally {
+      setIsAddingRepositories(false);
+    }
+  };
+
+  // リポジトリを削除
+  const handleRemoveRepository = async (repositoryName: string) => {
+    if (!confirm(`リポジトリ「${repositoryName}」を削除しますか？関連する評価結果も削除されます。`)) {
+      return;
+    }
+    
+    try {
+      const { hackathonOperations } = await import("@/lib/supabase");
+      const result = await hackathonOperations.removeRepositoryFromHackathon(
+        params.id as string,
+        repositoryName
+      );
+      
+      if (result.success) {
+        // ハッカソン詳細を再読み込み
+        window.location.reload();
+      } else {
+        alert("リポジトリの削除に失敗しました");
+      }
+    } catch (error) {
+      console.error("Error removing repository:", error);
+      alert("リポジトリの削除に失敗しました");
+    }
+  };
+
+  // 失敗したリポジトリを再実行
+  const handleRetryRepository = async (repositoryName: string) => {
+    try {
+      const { hackathonOperations } = await import("@/lib/supabase");
+      const result = await hackathonOperations.retryFailedRepository(
+        params.id as string,
+        repositoryName
+      );
+      
+      if (result.success) {
+        alert("リポジトリの再分析を開始しました");
+        // ハッカソン詳細を再読み込み
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
+      } else {
+        alert("再分析の開始に失敗しました");
+      }
+    } catch (error) {
+      console.error("Error retrying repository:", error);
+      alert("再分析の開始に失敗しました");
+    }
+  };
 
   if (loading || isLoading) {
     return (
@@ -351,9 +504,97 @@ export default function HackathonDetailPage() {
           {/* リポジトリ一覧（順位付き） */}
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Trophy className="w-5 h-5 text-primary" />
-                リポジトリ順位
+              <CardTitle className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Trophy className="w-5 h-5 text-primary" />
+                  リポジトリ順位
+                </div>
+                <Dialog open={isAddRepositoryOpen} onOpenChange={setIsAddRepositoryOpen}>
+                  <DialogTrigger asChild>
+                    <Button size="sm" className="flex items-center gap-2">
+                      <Plus className="w-4 h-4" />
+                      リポジトリを追加
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>リポジトリを追加</DialogTitle>
+                      <DialogDescription>
+                        GitHub組織名を入力してリポジトリを選択してください
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="github-org">GitHub組織名</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            id="github-org"
+                            placeholder="例: microsoft"
+                            value={githubOrg}
+                            onChange={(e) => setGithubOrg(e.target.value)}
+                          />
+                          <Button 
+                            onClick={loadGitHubRepositories}
+                            disabled={isLoadingRepos || !githubOrg.trim()}
+                          >
+                            {isLoadingRepos ? "読み込み中..." : "取得"}
+                          </Button>
+                        </div>
+                      </div>
+                      
+                      {availableRepos.length > 0 && (
+                        <div className="space-y-2">
+                          <Label>リポジトリを選択</Label>
+                          <div className="max-h-48 overflow-y-auto space-y-2 border rounded p-2">
+                            {availableRepos.map((repo) => (
+                              <div key={repo} className="flex items-center space-x-2">
+                                <Checkbox
+                                  id={repo}
+                                  checked={selectedRepos.includes(repo)}
+                                  onCheckedChange={(checked) => {
+                                    if (checked) {
+                                      setSelectedRepos([...selectedRepos, repo]);
+                                    } else {
+                                      setSelectedRepos(selectedRepos.filter(r => r !== repo));
+                                    }
+                                  }}
+                                />
+                                <Label 
+                                  htmlFor={repo}
+                                  className="text-sm font-normal cursor-pointer"
+                                >
+                                  {repo}
+                                </Label>
+                              </div>
+                            ))}
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            {selectedRepos.length} 個のリポジトリが選択されています
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                    <DialogFooter>
+                      <Button 
+                        variant="outline" 
+                        onClick={() => {
+                          setIsAddRepositoryOpen(false);
+                          setGithubOrg("");
+                          setAvailableRepos([]);
+                          setSelectedRepos([]);
+                        }}
+                      >
+                        キャンセル
+                      </Button>
+                      <Button 
+                        onClick={handleAddRepositories}
+                        disabled={selectedRepos.length === 0 || isAddingRepositories}
+                      >
+                        {isAddingRepositories ? "追加中..." : `${selectedRepos.length}個を追加`}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -417,19 +658,47 @@ export default function HackathonDetailPage() {
                               {repoStatus.evaluation.total_score}点
                             </div>
                           )}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              window.open(
-                                `https://github.com/${repoStatus.repository_name}`,
-                                "_blank"
-                              );
-                            }}
-                          >
-                            <ExternalLink className="w-4 h-4" />
-                          </Button>
+                          <div className="flex gap-2">
+                            {/* 失敗の場合は再実行ボタンを表示 */}
+                            {!isCompleted && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRetryRepository(repoStatus.repository_name);
+                                }}
+                                title="再実行"
+                              >
+                                <RefreshCw className="w-4 h-4" />
+                              </Button>
+                            )}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.open(
+                                  `https://github.com/${repoStatus.repository_name}`,
+                                  "_blank"
+                                );
+                              }}
+                            >
+                              <ExternalLink className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveRepository(repoStatus.repository_name);
+                              }}
+                              className="text-red-500 hover:text-red-700"
+                              title="削除"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
                         </div>
                       );
                     })
@@ -452,15 +721,40 @@ export default function HackathonDetailPage() {
                             Claude Codeによる解析を実行中...
                           </div>
                         </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            window.open(`https://github.com/${repo}`, "_blank")
-                          }
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRetryRepository(repo);
+                            }}
+                            title="再実行"
+                          >
+                            <RefreshCw className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              window.open(`https://github.com/${repo}`, "_blank")
+                            }
+                          >
+                            <ExternalLink className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveRepository(repo);
+                            }}
+                            className="text-red-500 hover:text-red-700"
+                            title="削除"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
                       </div>
                     )) || []}
               </div>

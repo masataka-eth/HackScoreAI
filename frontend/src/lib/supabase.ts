@@ -297,9 +297,9 @@ export const hackathonOperations = {
   },
 
   // ハッカソンにリポジトリを追加
-  async addRepositoryToHackathon(hackathonId: string, repositoryName: string) {
+  async addRepositoryToHackathon(jobId: string, repositoryName: string) {
     try {
-      console.log('🔄 Adding repository to hackathon:', { hackathonId, repositoryName })
+      console.log('🔄 Adding repository to hackathon:', { jobId, repositoryName })
       
       // Check authentication status
       const { data: { session }, error: authError } = await supabase.auth.getSession()
@@ -312,7 +312,7 @@ export const hackathonOperations = {
       
       const { data, error } = await supabase.functions.invoke('add-repository', {
         body: {
-          hackathonId,
+          jobId,
           repositoryName
         }
       })
@@ -332,9 +332,9 @@ export const hackathonOperations = {
   },
 
   // ハッカソンからリポジトリを削除
-  async removeRepositoryFromHackathon(hackathonId: string, repositoryName: string) {
+  async removeRepositoryFromHackathon(jobId: string, repositoryName: string) {
     try {
-      console.log('🗑️ Removing repository from hackathon:', { hackathonId, repositoryName })
+      console.log('🗑️ Removing repository from hackathon:', { jobId, repositoryName })
       
       // Check authentication status
       const { data: { session }, error: authError } = await supabase.auth.getSession()
@@ -347,7 +347,7 @@ export const hackathonOperations = {
       
       const { data, error } = await supabase.functions.invoke('remove-repository', {
         body: {
-          hackathonId,
+          jobId,
           repositoryName
         }
       })
@@ -367,9 +367,9 @@ export const hackathonOperations = {
   },
 
   // ハッカソンを削除
-  async deleteHackathon(hackathonId: string) {
+  async deleteHackathon(jobId: string) {
     try {
-      console.log('🗑️ Deleting hackathon:', { hackathonId })
+      console.log('🗑️ Deleting hackathon:', { jobId })
       
       // Check authentication status
       const { data: { session }, error: authError } = await supabase.auth.getSession()
@@ -382,7 +382,7 @@ export const hackathonOperations = {
       
       const { data, error } = await supabase.functions.invoke('delete-hackathon', {
         body: {
-          hackathonId
+          jobId
         }
       })
 
@@ -396,6 +396,41 @@ export const hackathonOperations = {
       return { success: true, data }
     } catch (error) {
       console.error('Error deleting hackathon:', error)
+      return { success: false, error }
+    }
+  },
+
+  // 失敗したリポジトリを再実行
+  async retryFailedRepository(jobId: string, repositoryName: string) {
+    try {
+      console.log('🔄 Retrying failed repository:', { jobId, repositoryName })
+      
+      // Check authentication status
+      const { data: { session }, error: authError } = await supabase.auth.getSession()
+      console.log('🔐 Current session:', { session: !!session, authError })
+      
+      if (!session) {
+        console.error('❌ No active session found')
+        throw new Error('認証が必要です。ログインしてください。')
+      }
+      
+      const { data, error } = await supabase.functions.invoke('retry-repository', {
+        body: {
+          jobId,
+          repositoryName
+        }
+      })
+
+      console.log('📡 Edge Function response:', { data, error })
+
+      if (error) {
+        console.error('❌ Edge Function error:', error)
+        throw error
+      }
+      
+      return { success: true, data }
+    } catch (error) {
+      console.error('Error retrying repository:', error)
       return { success: false, error }
     }
   }

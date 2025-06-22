@@ -5,6 +5,12 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Plus,
   Settings,
   LogOut,
@@ -12,6 +18,8 @@ import {
   Code,
   Clock,
   Play,
+  Trash2,
+  MoreVertical,
 } from "lucide-react";
 import { OctocatCharacter } from "@/components/octocat-character";
 import { BinaryBackground } from "@/components/binary-background";
@@ -106,6 +114,28 @@ export default function DashboardPage() {
 
     return () => clearInterval(interval);
   }, [user]);
+
+  // ハッカソンを削除
+  const handleDeleteHackathon = async (hackathonId: string, hackathonName: string) => {
+    if (!confirm(`ハッカソン「${hackathonName}」を削除しますか？この操作は取り消せません。`)) {
+      return;
+    }
+    
+    try {
+      const { hackathonOperations } = await import("@/lib/supabase");
+      const result = await hackathonOperations.deleteHackathon(hackathonId);
+      
+      if (result.success) {
+        // ハッカソン一覧を再読み込み
+        loadHackathons();
+      } else {
+        alert("ハッカソンの削除に失敗しました");
+      }
+    } catch (error) {
+      console.error("Error deleting hackathon:", error);
+      alert("ハッカソンの削除に失敗しました");
+    }
+  };
 
   if (loading) {
     return (
@@ -247,23 +277,49 @@ export default function DashboardPage() {
                       </div>
                     </div>
 
-                    <div className="text-right">
-                      {hackathon.status === "completed" ? (
-                        <div className="flex items-center gap-2 text-green-500">
-                          <Trophy className="w-4 h-4" />
-                          分析完了
-                        </div>
-                      ) : hackathon.status === "failed" ? (
-                        <div className="flex items-center gap-2 text-red-500">
-                          <Trophy className="w-4 h-4" />
-                          分析失敗
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2 text-yellow-500">
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-500"></div>
-                          分析中...
-                        </div>
-                      )}
+                    <div className="flex items-center gap-2">
+                      <div className="text-right">
+                        {hackathon.status === "completed" ? (
+                          <div className="flex items-center gap-2 text-green-500">
+                            <Trophy className="w-4 h-4" />
+                            分析完了
+                          </div>
+                        ) : hackathon.status === "failed" ? (
+                          <div className="flex items-center gap-2 text-red-500">
+                            <Trophy className="w-4 h-4" />
+                            分析失敗
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 text-yellow-500">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-500"></div>
+                            分析中...
+                          </div>
+                        )}
+                      </div>
+                      
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteHackathon(hackathon.id, hackathon.name);
+                            }}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            削除
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </div>
 

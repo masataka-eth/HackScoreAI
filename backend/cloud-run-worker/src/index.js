@@ -68,6 +68,7 @@ const authenticateRequest = (req, res, next) => {
 
 // Health check (no auth required)
 app.get("/health", (req, res) => {
+  console.log(`🏥 Health check request received from ${req.ip}`);
   res.json({
     status: "ok",
     service: "claudecode-worker",
@@ -79,6 +80,12 @@ app.get("/health", (req, res) => {
       timeoutMs: config.processing.timeoutMs,
     },
   });
+});
+
+// Simple test endpoint
+app.get("/test", (req, res) => {
+  console.log(`🧪 Test request received from ${req.ip}`);
+  res.send("Hello from Cloud Run Worker!");
 });
 
 // Process single repository (HTTP trigger) - requires authentication
@@ -561,7 +568,14 @@ async function updateJobStatus(jobId, status, result = null) {
 }
 
 // Start server
-app.listen(config.server.port, () => {
+console.log(`🔍 DEBUG: About to start server on port ${config.server.port}`);
+console.log(`🔍 DEBUG: Config object:`, JSON.stringify(config, null, 2));
+
+const server = app.listen(config.server.port, '0.0.0.0', (err) => {
+  if (err) {
+    console.error(`❌ Server failed to start:`, err);
+    process.exit(1);
+  }
   console.log(`🚀 ClaudeCode Worker starting...`);
   console.log(`📊 Environment: ${config.server.nodeEnv}`);
   console.log(`🌐 Port: ${config.server.port}`);
@@ -569,4 +583,14 @@ app.listen(config.server.port, () => {
   console.log(`🔧 Max turns per analysis: ${config.processing.maxTurns}`);
   console.log(`⏱️  Analysis timeout: ${config.processing.timeoutMs}ms`);
   console.log(`✅ ClaudeCode Worker ready!`);
+  console.log(`🔍 DEBUG: Server listening:`, server.listening);
+  console.log(`🔍 DEBUG: Server address:`, server.address());
+});
+
+server.on('error', (err) => {
+  console.error(`❌ Server error:`, err);
+});
+
+server.on('listening', () => {
+  console.log(`🎯 Server is now listening on port ${config.server.port}`);
 });

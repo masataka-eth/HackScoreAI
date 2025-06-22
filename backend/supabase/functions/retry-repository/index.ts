@@ -35,38 +35,63 @@ serve(async (req: Request) => {
     }
 
     // Parse request body
-    const { jobId } = await req.json();
+    const { jobId, repositoryName } = await req.json();
 
-    if (!jobId) {
+    if (!jobId || !repositoryName) {
       return new Response(
-        JSON.stringify({ error: "jobId is required" }),
+        JSON.stringify({ error: "jobId and repositoryName are required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`🗑️ Deleting hackathon ${jobId} for user ${user.id}`);
+    console.log(`= Retrying repository ${repositoryName} for hackathon ${jobId} for user ${user.id}`);
 
-    // Delete hackathon using database function
-    const { data, error: deleteError } = await supabase.rpc("delete_hackathon", {
+    // Retry repository using database function
+    const { data, error: retryError } = await supabase.rpc("retry_failed_repository", {
       p_hackathon_id: jobId,
+      p_repository_name: repositoryName,
       p_user_id: user.id,
     });
 
-    if (deleteError) {
-      console.error("Failed to delete hackathon:", deleteError);
+    if (retryError) {
+      console.error("Failed to retry repository:", retryError);
       return new Response(
-        JSON.stringify({ error: "Failed to delete hackathon", details: deleteError.message }),
+        JSON.stringify({ error: "Failed to retry repository", details: retryError.message }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`✅ Hackathon deleted successfully: ${JSON.stringify(data)}`);
+    console.log(` Repository retry queued successfully: ${JSON.stringify(data)}`);
+
+    // Trigger Cloud Run worker ping
+    const cloudRunUrl = Deno.env.get("CLOUD_RUN_WORKER_URL");
+    if (cloudRunUrl) {
+      try {
+        const pingResponse = await fetch(`${cloudRunUrl}/poll`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${Deno.env.get("CLOUD_RUN_AUTH_TOKEN")}`,
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (!pingResponse.ok) {
+          console.error(`Worker ping failed: ${pingResponse.status}`);
+        } else {
+          console.log(" Worker pinged successfully");
+        }
+      } catch (pingError) {
+        console.error("Failed to ping worker:", pingError);
+        // Don't fail the request if ping fails
+      }
+    }
 
     return new Response(
       JSON.stringify({
         success: data,
-        message: "Hackathon deleted successfully",
+        message: "Repository retry queued successfully",
         jobId,
+        repositoryName,
       }),
       {
         status: 200,

@@ -35,20 +35,20 @@ serve(async (req: Request) => {
     }
 
     // Parse request body
-    const { hackathonId, repositoryName } = await req.json();
+    const { jobId, repositoryName } = await req.json();
 
-    if (!hackathonId || !repositoryName) {
+    if (!jobId || !repositoryName) {
       return new Response(
-        JSON.stringify({ error: "hackathonId and repositoryName are required" }),
+        JSON.stringify({ error: "jobId and repositoryName are required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`🔄 Adding repository ${repositoryName} to hackathon ${hackathonId} for user ${user.id}`);
+    console.log(`🔄 Adding repository ${repositoryName} to hackathon ${jobId} for user ${user.id}`);
 
     // Add repository using database function
-    const { data: newJobId, error: addError } = await supabase.rpc("add_repository_to_hackathon", {
-      p_hackathon_id: hackathonId,
+    const { data, error: addError } = await supabase.rpc("add_repository_to_hackathon", {
+      p_hackathon_id: jobId,
       p_repository_name: repositoryName,
       p_user_id: user.id,
     });
@@ -61,7 +61,7 @@ serve(async (req: Request) => {
       );
     }
 
-    console.log(`✅ Repository added successfully. New job ID: ${newJobId}`);
+    console.log(`✅ Repository added successfully: ${JSON.stringify(data)}`);
 
     // Trigger Cloud Run worker ping
     const cloudRunUrl = Deno.env.get("CLOUD_RUN_WORKER_URL");
@@ -89,10 +89,10 @@ serve(async (req: Request) => {
     return new Response(
       JSON.stringify({
         success: true,
-        newJobId,
-        hackathonId,
-        repositoryName,
         message: "Repository added successfully",
+        newJobId: data,
+        jobId,
+        repositoryName,
       }),
       {
         status: 200,
