@@ -271,7 +271,7 @@ export default function DashboardPage() {
                     {hackathon.repositories.map((repo) => (
                       <span
                         key={repo}
-                        className="px-2 py-1 bg-secondary text-secondary-foreground rounded text-xs"
+                        className="px-2 py-1 bg-yellow-300 text-black rounded text-xs"
                       >
                         {repo}
                       </span>

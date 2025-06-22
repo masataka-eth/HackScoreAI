@@ -395,7 +395,7 @@ export default function HackathonDetailPage() {
                             ) : (
                               <div className="flex items-center gap-2">
                                 <Loader2 className="w-5 h-5 animate-spin text-yellow-600" />
-                                <div className="text-lg font-bold text-yellow-600">
+                                <div className="text-lg font-bold text-yellow-900 dark:text-yellow-100">
                                   評価中
                                 </div>
                               </div>
@@ -407,7 +407,7 @@ export default function HackathonDetailPage() {
                               {repoStatus.repository_name}
                             </div>
                             {!isCompleted && (
-                              <div className="text-sm text-yellow-600 dark:text-yellow-400">
+                              <div className="text-sm text-yellow-900 dark:text-yellow-100">
                                 AIエージェントによる解析を実行中...
                               </div>
                             )}
@@ -441,14 +441,14 @@ export default function HackathonDetailPage() {
                       >
                         <div className="flex items-center gap-2">
                           <Loader2 className="w-5 h-5 animate-spin text-yellow-600" />
-                          <div className="text-lg font-bold text-yellow-600">
+                          <div className="text-lg font-bold text-yellow-900 dark:text-yellow-100">
                             評価中
                           </div>
                         </div>
                         <GitBranch className="w-4 h-4 text-muted-foreground" />
                         <div className="flex-1">
                           <div className="font-medium text-lg">{repo}</div>
-                          <div className="text-sm text-yellow-600 dark:text-yellow-400">
+                          <div className="text-sm text-yellow-900 dark:text-yellow-100">
                             Claude Codeによる解析を実行中...
                           </div>
                         </div>
