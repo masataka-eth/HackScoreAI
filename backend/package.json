@@ -1,0 +1,20 @@
+{
+  "name": "hackscore-backend",
+  "version": "1.0.0",
+  "description": "HackScoreAI Backend with Supabase Edge Functions",
+  "type": "module",
+  "scripts": {
+    "dev": "supabase functions serve",
+    "deploy": "supabase functions deploy",
+    "db:push": "supabase db push",
+    "db:reset": "supabase db reset"
+  },
+  "dependencies": {
+    "hono": "^4.6.13",
+    "@supabase/supabase-js": "^2.47.10"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}
