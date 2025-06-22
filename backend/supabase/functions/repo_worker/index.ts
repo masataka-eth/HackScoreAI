@@ -101,12 +101,12 @@ serve(async (req) => {
         .eq('queue_message_id', message.msg_id)
 
       try {
-        // Get user secrets from vault
-        const userId = message.message.userId || '11111111-1111-1111-1111-111111111111' // Test user for now
-        const secrets = await getUserSecrets(supabase, userId)
-        
-        // Process repositories with ClaudeCode
-        const result = await processRepositoriesWithClaudeCode(supabase, message.message, secrets)
+        // Forward job to Cloud Run worker (without secrets)
+        const result = await forwardToCloudRunWorker({
+          ...message.message,
+          // Don't send secrets over HTTP - Cloud Run will fetch them directly
+          requiresSecrets: true
+        })
 
         // Update job status to completed
         await supabase
@@ -183,6 +183,28 @@ serve(async (req) => {
     }
   )
 })
+
+// Forward job to Cloud Run worker
+async function forwardToCloudRunWorker(jobPayload: any) {
+  const cloudRunUrl = Deno.env.get('CLOUD_RUN_WORKER_URL') || 'http://localhost:8080'
+  
+  console.log('🚀 Forwarding job to Cloud Run worker:', cloudRunUrl)
+  
+  const response = await fetch(`${cloudRunUrl}/process`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${Deno.env.get('CLOUD_RUN_AUTH_TOKEN') || ''}`
+    },
+    body: JSON.stringify(jobPayload)
+  })
+  
+  if (!response.ok) {
+    throw new Error(`Cloud Run worker failed: ${response.status} ${response.statusText}`)
+  }
+  
+  return await response.json()
+}
 
 // Get user secrets from vault
 async function getUserSecrets(supabase: any, userId: string) {
