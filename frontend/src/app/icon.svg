@@ -1,26 +1,33 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <!-- 背景 -->
-  <rect width="32" height="32" fill="#000000" rx="4"/>
-  
-  <!-- Octocat顔（簡略版） -->
-  <g transform="translate(16, 16)">
-    <!-- 顔 -->
-    <circle cx="0" cy="0" r="10" fill="#24292e"/>
-    
-    <!-- 耳 -->
-    <path d="M -8,-8 Q -10,-12 -6,-10" fill="#24292e"/>
-    <path d="M 8,-8 Q 10,-12 6,-10" fill="#24292e"/>
-    
-    <!-- バンダナ -->
-    <path d="M -10,-6 Q 0,-8 10,-6 L 10,-2 Q 0,-4 -10,-2 Z" fill="#ff3366"/>
-    
-    <!-- 目 -->
-    <circle cx="-4" cy="0" r="2.5" fill="#ffffff"/>
-    <circle cx="4" cy="0" r="2.5" fill="#ffffff"/>
-    <circle cx="-4" cy="0.5" r="1.5" fill="#000000"/>
-    <circle cx="4" cy="0.5" r="1.5" fill="#000000"/>
-    
-    <!-- 口 -->
-    <path d="M -2,4 Q 0,5.5 2,4" fill="none" stroke="#ffffff" stroke-width="1" stroke-linecap="round"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 16 16" style="image-rendering: pixelated">
+  <!-- 頭部 -->
+  <rect x="4" y="2" width="8" height="6" fill="#00ffaa" />
+  <rect x="3" y="3" width="10" height="4" fill="#00ffaa" />
+  <rect x="2" y="4" width="12" height="2" fill="#00ffaa" />
+
+  <!-- 耳 -->
+  <rect x="1" y="1" width="2" height="3" fill="#00ffaa" />
+  <rect x="13" y="1" width="2" height="3" fill="#00ffaa" />
+
+  <!-- 目 -->
+  <rect x="5" y="4" width="2" height="2" fill="#0a0a0a" />
+  <rect x="9" y="4" width="2" height="2" fill="#0a0a0a" />
+
+  <!-- 口 -->
+  <rect x="7" y="6" width="2" height="1" fill="#0a0a0a" />
+
+  <!-- 体 -->
+  <rect x="5" y="8" width="6" height="4" fill="#00ffaa" />
+  <rect x="4" y="9" width="8" height="2" fill="#00ffaa" />
+
+  <!-- 腕 -->
+  <rect x="2" y="9" width="2" height="3" fill="#00ffaa" />
+  <rect x="12" y="9" width="2" height="3" fill="#00ffaa" />
+
+  <!-- 足 -->
+  <rect x="5" y="12" width="2" height="3" fill="#00ffaa" />
+  <rect x="9" y="12" width="2" height="3" fill="#00ffaa" />
+
+  <!-- ヘッドバンド (ハッカー風) -->
+  <rect x="3" y="2" width="10" height="1" fill="#ff3366" />
+  <rect x="11" y="1" width="3" height="1" fill="#ff3366" />
 </svg> 

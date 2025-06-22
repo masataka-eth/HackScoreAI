@@ -14,8 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "HackScore AI - ハッカソンリポジトリ自動評価プラットフォーム",
-  description: "Claude Codeを使用してGitHubリポジトリを自動解析し、ハッカソン向けスコアリングを行うAIプラットフォーム",
+  title: "HackScore AI",
+  description:
+    "Claude Codeを使用してGitHubリポジトリを自動解析し、ハッカソン向けスコアリングを行うAIプラットフォーム",
 };
 
 export default function RootLayout({
@@ -28,9 +29,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <Providers>
-          {children}
-        </Providers>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );
