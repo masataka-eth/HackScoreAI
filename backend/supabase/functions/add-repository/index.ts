@@ -85,28 +85,9 @@ serve(async (req: Request) => {
 
     console.log(`✅ Repository added successfully: ${JSON.stringify(data)}`);
 
-    // Trigger Cloud Run worker ping
-    const cloudRunUrl = Deno.env.get("CLOUD_RUN_WORKER_URL");
-    if (cloudRunUrl) {
-      try {
-        const pingResponse = await fetch(`${cloudRunUrl}/poll`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${Deno.env.get("CLOUD_RUN_AUTH_TOKEN")}`,
-            "Content-Type": "application/json",
-          },
-        });
-
-        if (!pingResponse.ok) {
-          console.error(`Worker ping failed: ${pingResponse.status}`);
-        } else {
-          console.log("✅ Worker pinged successfully");
-        }
-      } catch (pingError) {
-        console.error("Failed to ping worker:", pingError);
-        // Don't fail the request if ping fails
-      }
-    }
+    // Note: Worker ping is removed from here to prevent multiple individual pings
+    // when adding multiple repositories. The frontend will handle worker pinging
+    // after all repositories are added.
 
     return new Response(
       JSON.stringify({

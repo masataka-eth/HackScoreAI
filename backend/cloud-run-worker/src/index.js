@@ -115,18 +115,35 @@ app.post("/process", authenticateRequest, async (req, res) => {
 
     if (result.success) {
       try {
+        console.log(`💾 Saving evaluation result for ${repository}...`);
+        console.log(`💾 Job ID: ${jobId}, User ID: ${userId}`);
+        console.log(
+          `💾 Evaluation data:`,
+          JSON.stringify(result.evaluation, null, 2)
+        );
+
         // Save to Supabase database
-        await saveEvaluationResult(
+        const saveResult = await saveEvaluationResult(
           jobId,
           userId,
           repository,
           result.evaluation,
           result.metadata
         );
+
+        console.log(
+          `✅ Successfully saved evaluation result for ${repository}:`,
+          saveResult
+        );
       } catch (saveError) {
         console.error(
-          `Failed to save evaluation result for ${repository}:`,
+          `❌ Failed to save evaluation result for ${repository}:`,
           saveError
+        );
+        console.error(
+          `❌ Save error details:`,
+          saveError.message,
+          saveError.stack
         );
         result.success = false;
         result.error = `Failed to save evaluation: ${saveError.message}`;
@@ -135,12 +152,29 @@ app.post("/process", authenticateRequest, async (req, res) => {
 
     // Update job status in Supabase
     const status = result.success ? "completed" : "failed";
-    await updateJobStatus(jobId, status, {
-      repository,
-      success: result.success,
-      error: result.error,
-      totalScore: result.evaluation?.totalScore,
-    });
+    console.log(`📝 Updating job status to "${status}" for job ${jobId}...`);
+
+    try {
+      await updateJobStatus(jobId, status, {
+        repository,
+        success: result.success,
+        error: result.error,
+        totalScore: result.evaluation?.totalScore,
+      });
+      console.log(
+        `✅ Successfully updated job status to "${status}" for job ${jobId}`
+      );
+    } catch (statusError) {
+      console.error(
+        `❌ Failed to update job status for ${jobId}:`,
+        statusError
+      );
+      console.error(
+        `❌ Status error details:`,
+        statusError.message,
+        statusError.stack
+      );
+    }
 
     res.json({
       success: true,
@@ -170,98 +204,238 @@ app.post("/process", authenticateRequest, async (req, res) => {
 // Poll Supabase queue and process jobs - requires authentication
 app.post("/poll", authenticateRequest, async (req, res) => {
   try {
-    console.log("📥 Polling for jobs...");
+    console.log("📥 Starting continuous polling for jobs...");
+    let processedCount = 0;
+    let processedJobs = [];
+    let hasErrors = false;
+    let lastError = null;
 
-    // Read from pgmq queue
-    console.log("🔍 Reading from pgmq queue with params:", {
+    // Check initial queue state for debugging
+    const { data: initialQueueStats } = await supabase.rpc("pgmq_metrics", {
       queue_name: "repo_analysis_queue",
-      visibility_timeout: 300,
-      qty: 1,
     });
+    console.log("📊 Initial queue state:", initialQueueStats);
 
-    const { data: messages, error } = await supabase.rpc("pgmq_read", {
-      queue_name: "repo_analysis_queue",
-      visibility_timeout: 300,
-      qty: 1,
-    });
+    while (true) {
+      console.log(`🔄 Polling iteration ${processedCount + 1}...`);
 
-    console.log("🔍 Queue read result:", {
-      messages: messages ? messages.length : 0,
-      error: error?.message || null,
-    });
+      // Read from pgmq queue with extended timeout
+      console.log("🔍 Reading from pgmq queue with params:", {
+        queue_name: "repo_analysis_queue",
+        visibility_timeout: 1800, // 30分に大幅延長（処理時間余裕を考慮）
+        qty: 1,
+      });
 
-    if (error) {
-      console.error("❌ Queue read error details:", error);
-      throw new Error(`Queue read error: ${error.message}`);
-    }
+      const { data: messages, error } = await supabase.rpc("pgmq_read", {
+        queue_name: "repo_analysis_queue",
+        visibility_timeout: 1800, // 30分に大幅延長（処理時間余裕を考慮）
+        qty: 1,
+      });
 
-    if (!messages || messages.length === 0) {
-      console.log("ℹ️ No messages in queue - returning empty result");
-      return res.json({ message: "No jobs in queue" });
-    }
+      console.log("🔍 Queue read result:", {
+        messages: messages ? messages.length : 0,
+        error: error?.message || null,
+        firstMessageId:
+          messages && messages.length > 0 ? messages[0].msg_id : null,
+      });
 
-    const message = messages[0];
-    console.log("📨 Processing message:", message.msg_id);
-    console.log(
-      "🔍 Message content:",
-      JSON.stringify(message.message, null, 2)
-    );
-    console.log("🔍 Request host header:", req.get("host"));
-    console.log("🔍 Request protocol:", req.protocol);
+      if (error) {
+        console.error("❌ Queue read error details:", error);
+        hasErrors = true;
+        lastError = `Queue read error: ${error.message}`;
+        break;
+      }
 
-    // Update job status to processing
-    await updateJobStatus(message.message.jobId, "processing");
+      if (!messages || messages.length === 0) {
+        console.log(
+          `ℹ️ No more messages in queue - processed ${processedCount} jobs total`
+        );
 
-    try {
-      // Process the job
-      const processResult = await fetch(
-        `http://localhost:${config.server.port}/process`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${config.auth.token}`,
-          },
-          body: JSON.stringify(message.message),
-        }
+        // Log final queue state for debugging
+        const { data: finalQueueStats } = await supabase.rpc("pgmq_metrics", {
+          queue_name: "repo_analysis_queue",
+        });
+        console.log("📊 Final queue state:", finalQueueStats);
+        break;
+      }
+
+      const message = messages[0];
+      console.log("📨 Processing message:", message.msg_id);
+      console.log(
+        "🔍 Message content:",
+        JSON.stringify(message.message, null, 2)
       );
 
-      if (processResult.ok) {
-        console.log("✅ Job processing completed successfully");
-        // Delete message from queue on success
-        await supabase.rpc("pgmq_delete", {
-          queue_name: "repo_analysis_queue",
-          msg_id: message.msg_id,
-        });
-      } else {
-        console.error(
-          `❌ Job processing failed with status: ${processResult.status}`
+      // Update job status to processing
+      await updateJobStatus(message.message.jobId, "processing");
+
+      let messageHandled = false;
+
+      try {
+        // Process the job
+        console.log(
+          `🚀 Starting processing for job ${message.message.jobId}...`
         );
+        const processResult = await fetch(
+          `http://localhost:${config.server.port}/process`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${config.auth.token}`,
+            },
+            body: JSON.stringify(message.message),
+          }
+        );
+
+        if (processResult.ok) {
+          console.log(
+            `✅ Job ${message.message.jobId} processing completed successfully`
+          );
+
+          // Delete message from queue on success with verification
+          console.log(`🗑️ Deleting message ${message.msg_id} from queue...`);
+          const { data: deleteResult, error: deleteError } = await supabase.rpc(
+            "pgmq_delete",
+            {
+              queue_name: "repo_analysis_queue",
+              msg_id: message.msg_id,
+            }
+          );
+
+          if (deleteError) {
+            console.error(
+              `❌ Failed to delete message ${message.msg_id}:`,
+              deleteError
+            );
+            hasErrors = true;
+            lastError = `Delete failed: ${deleteError.message}`;
+          } else {
+            console.log(
+              `✅ Successfully deleted message ${message.msg_id}, result:`,
+              deleteResult
+            );
+            messageHandled = true;
+          }
+
+          console.log(`✅ Successfully processed job ${message.message.jobId}`);
+          processedJobs.push({
+            messageId: message.msg_id,
+            jobId: message.message.jobId,
+            deleted: !deleteError,
+          });
+          processedCount++;
+        } else {
+          const errorText = await processResult.text();
+          console.error(
+            `❌ Job ${message.message.jobId} processing failed with status: ${processResult.status}, response: ${errorText}`
+          );
+
+          // Update job status to failed
+          await updateJobStatus(message.message.jobId, "failed", {
+            error: `Process endpoint returned status ${processResult.status}: ${errorText}`,
+          });
+
+          // Archive failed message with verification
+          console.log(`📦 Archiving failed message ${message.msg_id}...`);
+          const { data: archiveResult, error: archiveError } =
+            await supabase.rpc("pgmq_archive", {
+              queue_name: "repo_analysis_queue",
+              msg_id: message.msg_id,
+            });
+
+          if (archiveError) {
+            console.error(
+              `❌ Failed to archive message ${message.msg_id}:`,
+              archiveError
+            );
+          } else {
+            console.log(
+              `✅ Successfully archived message ${message.msg_id}, result:`,
+              archiveResult
+            );
+            messageHandled = true;
+          }
+
+          hasErrors = true;
+          lastError = `Process failed with status: ${processResult.status}`;
+        }
+      } catch (processError) {
+        console.error(
+          `❌ Job ${message.message.jobId} processing exception:`,
+          processError
+        );
+
         // Update job status to failed
         await updateJobStatus(message.message.jobId, "failed", {
-          error: `Process endpoint returned status ${processResult.status}`,
+          error: processError.message || "Unknown processing error",
         });
-        throw new Error(`Process failed with status: ${processResult.status}`);
+
+        // Archive failed message with verification
+        console.log(`📦 Archiving exception message ${message.msg_id}...`);
+        const { data: archiveResult, error: archiveError } = await supabase.rpc(
+          "pgmq_archive",
+          {
+            queue_name: "repo_analysis_queue",
+            msg_id: message.msg_id,
+          }
+        );
+
+        if (archiveError) {
+          console.error(
+            `❌ Failed to archive message ${message.msg_id}:`,
+            archiveError
+          );
+        } else {
+          console.log(
+            `✅ Successfully archived message ${message.msg_id}, result:`,
+            archiveResult
+          );
+          messageHandled = true;
+        }
+
+        hasErrors = true;
+        lastError = processError.message;
       }
-    } catch (processError) {
-      console.error(`❌ Job processing exception:`, processError);
-      // Update job status to failed
-      await updateJobStatus(message.message.jobId, "failed", {
-        error: processError.message || "Unknown processing error",
-      });
-      // Archive failed message
-      await supabase.rpc("pgmq_archive", {
+
+      // If message wasn't properly handled, we need to break to avoid infinite loop
+      if (!messageHandled) {
+        console.error(
+          `⚠️ Message ${message.msg_id} was not properly handled (not deleted or archived), breaking to avoid infinite loop`
+        );
+        hasErrors = true;
+        lastError = `Message ${message.msg_id} handling failed`;
+        break;
+      }
+
+      // Check queue state after processing for debugging
+      const { data: midQueueStats } = await supabase.rpc("pgmq_metrics", {
         queue_name: "repo_analysis_queue",
-        msg_id: message.msg_id,
       });
-      throw processError;
+      console.log(
+        `📊 Queue state after processing job ${message.message.jobId}:`,
+        midQueueStats
+      );
+
+      // Small delay between processing jobs to prevent overwhelming
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
-    res.json({
+    // Return summary of all processed jobs
+    const response = {
       success: true,
-      messageId: message.msg_id,
-      jobId: message.message.jobId,
-    });
+      processedCount,
+      processedJobs,
+      hasErrors,
+      lastError,
+      message:
+        processedCount === 0
+          ? "No jobs in queue"
+          : `Processed ${processedCount} jobs from queue`,
+    };
+
+    console.log("📊 Polling session completed:", response);
+    res.json(response);
   } catch (error) {
     console.error("Polling error:", error);
     res.status(500).json({
@@ -295,8 +469,8 @@ async function processRepositoryWithClaudeCode(
   try {
     console.log(`🔍 Analyzing repository: ${repoName}`);
 
-    //! const prompt = buildAnalysisPrompt(repoName, evaluationCriteria);
-    const prompt = buildTestAnalysisPrompt(repoName, evaluationCriteria);
+    const prompt = buildAnalysisPrompt_simple(repoName, evaluationCriteria);
+    // const prompt = buildTestAnalysisPrompt(repoName, evaluationCriteria);
     const abortController = new AbortController();
 
     // タイムアウト設定
@@ -513,6 +687,95 @@ README や API ドキュメントの充実度
 `;
 }
 
+function buildAnalysisPrompt_simple(repoName, evaluationCriteria) {
+  return `
+GitHub MCP を使用して、GitHub リポジトリ "${repoName}" を詳細に分析してください。必ず実際にファイルの内容を確認してから分析してください。
+
+[IMPORTANT]
+可能な限り少ないターン数で分析を行うために、工夫をしてください。
+必ず主要なファイルを見極めることでコンテンツ取得のターン数を減らしてください。
+ただし、**分析結果の精度は落としてはいけません**ので、主要なファイルを見極めは慎重に行ってください。
+
+**利用可能なツール:**
+- mcp__github__get_file_contents: ファイルの内容を取得
+- mcp__github__search_repositories: リポジトリを検索
+- mcp__github__search_code: コードを検索
+- mcp__github__list_commits: コミット履歴を取得
+- mcp__github__get_repository_structure: リポジトリの構造を取得
+- mcp__github__list_repository_contents: リポジトリの内容を取得
+
+**分析手順:**
+1. リポジトリの基本構造を取得して、どのディレクトリが重要かを判断
+2. README、package.json、requirements.txt等の設定ファイルを確認
+3. src/, lib/, app/等のメインディレクトリの主要なファイル一覧を取得
+4. 主要なソースコードファイルの内容を読み取り
+5. 評価する
+
+「市場優位性」の評価についてはマーケター目線でより多くのビジネス視点から分析してください。必要であればWEB検索をして調査してください。
+
+**出力形式（日本語で回答）:**
+
+{
+  "totalScore": 15,                // 0-20 の整数
+  "items": [
+    {
+      "id": "1",
+      "name": "市場優位性",        // 評価項目ラベル
+      "score": 3,                  // 整数（配分内）
+      "positives": "...",        // 良かった点 (1-3 件をわかりやすい文章で記載)
+      "negatives": "..."         // 改善点 (1-3 件をわかりやすい文章で記載)
+    },
+    ...
+    {
+      "id": "4",
+      "name": "ユーザビリティ",
+      "score": 5,
+      "positives": "...",
+      "negatives": "..."
+    }
+  ],
+  "overallComment": "総合的に見ると..." // 総合的に見てどうだったかをわかりやすい文章で記載、ここは長文となってもいいので詳細に記載してください。
+}
+
+## 評価項目
+### 評価項目\_1
+市場優位性
+#### 配分
+5 点
+#### 主な評価軸
+そのサービスが市場で勝ち残れるかどうか
+- 差別化ポイント: 似たサービスと比べて「ここが違う」と一目でわかる強みがあるか
+- 実用性: ユーザーの悩みを実際に解決できるか、すぐに役立つか
+- ビジネスポテンシャル: 市場規模や収益モデルが大きく伸びる余地を持っているか
+
+### 評価項目\_2
+技術力
+#### 配分
+5 点
+#### 主な評価軸
+技術面でどれだけ優れているか
+- AI技術の先進性: 最新・独自のアルゴリズムやモデルを活用できているか
+- コード品質: コードが読みやすく、テストやドキュメントも整っていてバグが少ないか
+
+### 評価項目\_3
+完成度・実装度
+#### 配分
+5 点
+#### 主な評価軸
+- コア機能の実装状況: 主要機能が動作し、デモやプロトタイプで確認できるか
+- 安定性: 長時間使ってもクラッシュや重大な不具合が起きないか
+
+### 評価項目\_4
+ユーザビリティ
+#### 配分
+5 点
+#### 主な評価軸
+使いやすく、続けて使いたくなるか
+- 直感的な操作性: 初めての人でも迷わず操作できるか
+- UI/UX: 画面が見やすく、入力や遷移がスムーズでストレスがないか
+`;
+}
+
 function buildTestAnalysisPrompt(repoName, evaluationCriteria) {
   const sampleResult = {
     totalScore: 75,
@@ -666,6 +929,14 @@ async function saveEvaluationResult(
   evaluationData,
   metadata
 ) {
+  console.log(`🗄️ Calling save_evaluation_result RPC with params:`, {
+    p_job_id: jobId,
+    p_user_id: userId,
+    p_repository_name: repositoryName,
+    p_evaluation_data: evaluationData ? "present" : "missing",
+    p_processing_metadata: metadata ? "present" : "missing",
+  });
+
   const { data, error } = await supabase.rpc("save_evaluation_result", {
     p_job_id: jobId,
     p_user_id: userId,
@@ -674,8 +945,16 @@ async function saveEvaluationResult(
     p_processing_metadata: metadata,
   });
 
+  console.log(`🗄️ RPC save_evaluation_result response:`, { data, error });
+
   if (error) {
-    console.error("Failed to save evaluation result:", error);
+    console.error("❌ Failed to save evaluation result:", error);
+    console.error(
+      "❌ Error details:",
+      error.message,
+      error.code,
+      error.details
+    );
     throw error;
   }
 
@@ -702,7 +981,12 @@ async function ensureJobStatus(jobId, userId, payload) {
 }
 
 async function updateJobStatus(jobId, status, result = null) {
-  const { error } = await supabase
+  console.log(
+    `📝 Updating job_status table for job ${jobId} with status "${status}"`
+  );
+  console.log(`📝 Result data:`, result);
+
+  const { data, error } = await supabase
     .from("job_status")
     .update({
       status,
@@ -711,9 +995,20 @@ async function updateJobStatus(jobId, status, result = null) {
     })
     .eq("id", jobId);
 
+  console.log(`📝 Job status update response:`, { data, error });
+
   if (error) {
-    console.error("Failed to update job status:", error);
+    console.error("❌ Failed to update job status:", error);
+    console.error(
+      "❌ Job status error details:",
+      error.message,
+      error.code,
+      error.details
+    );
+    throw error;
   }
+
+  return data;
 }
 
 // Start server

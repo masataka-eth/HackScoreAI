@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { OctocatCharacter } from "@/components/octocat-character";
 import { BinaryBackground } from "@/components/binary-background";
+import { toast } from "sonner";
 
 interface GitHubOrg {
   id: number;
@@ -250,10 +251,10 @@ export default function NewHackathonPage() {
     });
   };
 
-  // ハッカソン登録処理
+  // ハッカソン登録処理（即座通知版）
   const handleSubmit = async () => {
     if (!hackathonName.trim() || selectedRepos.length === 0) {
-      alert("ハッカソン名とリポジトリを選択してください");
+      toast.error("ハッカソン名とリポジトリを選択してください", { duration: 3000 });
       return;
     }
 
@@ -269,74 +270,95 @@ export default function NewHackathonPage() {
       );
 
       if (!anthropicKeyResult.success || !anthropicKeyResult.data) {
-        alert("先に設定画面でAnthropic API キーを設定してください");
+        toast.error("先に設定画面でAnthropic API キーを設定してください", { duration: 4000 });
         router.push("/settings");
         return;
       }
 
-      // Supabase経由でハッカソンを登録
+      // 即座に成功通知を表示
+      toast.success(
+        `🎉 ハッカソン「${hackathonName}」を登録中... ${selectedRepos.length}個のリポジトリの分析を開始します！`,
+        { duration: 4000 }
+      );
+
+      // 即座にダッシュボードに遷移
+      router.push("/dashboard");
+
+      // バックグラウンドでハッカソン登録処理を実行
       const { hackathonOperations } = await import("@/lib/supabase");
-      const result = await hackathonOperations.createHackathon({
-        name: hackathonName,
-        repositories: selectedRepos.map((repo) => repo.full_name),
-        userId,
-      });
-
-      console.log("🔍 Create hackathon result:", result);
-
-      if (result.success && result.data) {
-        // ハッカソン登録成功後、自動的に評価処理を開始
-        console.log(
-          "✅ Hackathon registered successfully, starting evaluation automatically..."
-        );
-
+      
+      Promise.resolve().then(async () => {
         try {
-          const workerResult =
-            await hackathonOperations.triggerWorkerProcessing();
-          if (workerResult.success) {
-            console.log("✅ Evaluation started automatically");
-            alert(
-              "ハッカソンを登録し、評価を開始しました！\n\nダッシュボードで進行状況を確認できます。評価には数分かかる場合があります。"
-            );
+          console.log("🚀 Creating hackathon in background...");
+          const result = await hackathonOperations.createHackathon({
+            name: hackathonName,
+            repositories: selectedRepos.map((repo) => repo.full_name),
+            userId,
+          });
+
+          console.log("🔍 Create hackathon result:", result);
+
+          if (result.success && result.data) {
+            console.log("✅ Hackathon registered successfully");
+
+            // ワーカー処理も自動開始（バックグラウンド）
+            try {
+              const workerResult = await hackathonOperations.triggerWorkerProcessing();
+              if (workerResult.success) {
+                console.log("✅ Evaluation started automatically");
+                toast.success(
+                  "✅ ハッカソン登録完了！分析をバックグラウンドで実行中です。",
+                  { duration: 3000 }
+                );
+              } else {
+                console.warn("⚠️ Automatic evaluation start failed");
+                toast.warning(
+                  "⚠️ ハッカソンは登録されましたが、分析の自動開始に失敗しました。",
+                  { duration: 4000 }
+                );
+              }
+            } catch (workerError) {
+              console.error("⚠️ Auto-worker trigger failed:", workerError);
+              toast.warning(
+                "⚠️ ハッカソンは登録されましたが、分析の自動開始に失敗しました。",
+                { duration: 4000 }
+              );
+            }
           } else {
-            console.warn(
-              "⚠️ Automatic evaluation start failed, but hackathon was registered"
-            );
-            alert(
-              "ハッカソンを登録しました。評価はダッシュボードから手動で開始してください。"
-            );
+            console.error("Hackathon creation failed:", result);
+            let errorMsg = "ハッカソンの登録に失敗しました";
+
+            if (result.error) {
+              if (typeof result.error === "string") {
+                errorMsg = result.error;
+              } else if (
+                typeof result.error === "object" &&
+                "message" in result.error
+              ) {
+                errorMsg = (result.error as any).message;
+              }
+            }
+
+            toast.error(`❌ ${errorMsg}`, { duration: 5000 });
           }
-        } catch (workerError) {
-          console.error("⚠️ Auto-worker trigger failed:", workerError);
-          alert(
-            "ハッカソンを登録しました。評価はダッシュボードから手動で開始してください。"
+        } catch (error) {
+          console.error("Background creation error:", error);
+          toast.error(
+            `❌ ハッカソンの登録に失敗しました: ${
+              error instanceof Error ? error.message : "不明なエラー"
+            }`,
+            { duration: 5000 }
           );
         }
+      });
 
-        router.push("/dashboard");
-      } else {
-        console.error("Hackathon creation failed:", result);
-        let errorMsg = "ハッカソンの登録に失敗しました";
-
-        if (result.error) {
-          if (typeof result.error === "string") {
-            errorMsg = result.error;
-          } else if (
-            typeof result.error === "object" &&
-            "message" in result.error
-          ) {
-            errorMsg = (result.error as any).message;
-          }
-        }
-
-        throw new Error(errorMsg);
-      }
     } catch (error) {
       console.error("Submit error:", error);
-      alert(
-        `登録に失敗しました: ${
+      toast.error(
+        `❌ 登録に失敗しました: ${
           error instanceof Error ? error.message : "不明なエラー"
-        }`
+        }`,
+        { duration: 4000 }
       );
     }
   };

@@ -40,6 +40,7 @@ interface HackathonDetails {
   id: string;
   name: string;
   repositories: string[];
+  repositoryJobStatus?: { [repo: string]: string };
   status: "pending" | "analyzing" | "completed" | "failed";
   score?: number;
   rank?: number;
@@ -165,17 +166,28 @@ export default function HackathonDetailPage() {
               (evaluation: any) => evaluation.repository_name === repoName
             );
             if (!isRepoEvaluated) {
-              // デフォルトは「分析中」
+              // job_statusの実際のステータスを確認
+              const jobStatus = result.data?.repositoryJobStatus?.[repoName];
               let status: "evaluating" | "failed" = "evaluating";
 
-              // ハッカソン全体が完了していて、かつ一定時間経過している場合のみ失敗と判定
-              // （ただし、新しく追加されたリポジトリは除外）
-              if (result.data?.status === "completed" && hackathon?.completedAt) {
-                const completedDate = new Date(hackathon.completedAt);
-                const hoursSinceCompletion = (Date.now() - completedDate.getTime()) / (1000 * 60 * 60);
-                // 完了から1時間以上経過している場合のみ失敗と判定
-                if (hoursSinceCompletion > 1) {
-                  status = "failed";
+              // job_statusがfailedの場合は失敗と判定
+              if (jobStatus === "failed") {
+                status = "failed";
+              } else if (jobStatus === "pending" || jobStatus === "processing") {
+                // pending, processingの場合は評価中
+                status = "evaluating";
+              } else {
+                // フォールバック: 時間ベースの失敗判定（後方互換性）
+                if (
+                  result.data?.status === "completed" &&
+                  hackathon?.completedAt
+                ) {
+                  const completedDate = new Date(hackathon.completedAt);
+                  const hoursSinceCompletion =
+                    (Date.now() - completedDate.getTime()) / (1000 * 60 * 60);
+                  if (hoursSinceCompletion > 1) {
+                    status = "failed";
+                  }
                 }
               }
 
@@ -270,43 +282,43 @@ export default function HackathonDetailPage() {
     if (selectedRepos.length === 0) return;
 
     setIsAddingRepositories(true);
-    
+
     // 選択したリポジトリを一時保存
     const reposToAdd = [...selectedRepos];
-    
+
     // Edge Function呼び出し開始時点で即座に成功通知＆モーダルを閉じる
     toast.success(
       `🎉 ${reposToAdd.length}個のリポジトリを解析キューに送信中...`,
       { duration: 3000 }
     );
-    
+
     // 即座にモーダルを閉じて画面を戻す
     setIsAddRepositoryOpen(false);
     setGithubOrg("");
     setAvailableRepos([]);
     setSelectedRepos([]);
-    
+
     // 即座にリポジトリ数を増やして表示（楽観的更新）
     if (hackathon) {
       // 新しいリポジトリを追加した状態を即座に反映
       const updatedRepositories = [...hackathon.repositories, ...reposToAdd];
       setHackathon({
         ...hackathon,
-        repositories: updatedRepositories
+        repositories: updatedRepositories,
       });
-      
+
       // 新しいリポジトリのステータスを「分析中」として追加
-      const newStatuses = reposToAdd.map(repo => ({
+      const newStatuses = reposToAdd.map((repo) => ({
         repository_name: repo,
         status: "evaluating" as const,
       }));
       setRepositoryStatuses([...repositoryStatuses, ...newStatuses]);
     }
-    
+
     try {
       console.log(`🚀 Adding ${reposToAdd.length} repositories to queue...`);
       const { hackathonOperations } = await import("@/lib/supabase");
-      
+
       let successCount = 0;
       let failedRepos: string[] = [];
 
@@ -319,7 +331,7 @@ export default function HackathonDetailPage() {
               params.id as string,
               repo
             );
-            
+
             if (result.success) {
               console.log(`✅ ${repo} added to queue successfully`);
               successCount++;
@@ -332,26 +344,38 @@ export default function HackathonDetailPage() {
             failedRepos.push(repo);
           }
         })
-      ).then(() => {
+      ).then(async () => {
         // バックグラウンド処理完了後の追加通知（オプション）
-        console.log(`📊 Final results: ${successCount} added, ${failedRepos.length} failed`);
-        
+        console.log(
+          `📊 Final results: ${successCount} added, ${failedRepos.length} failed`
+        );
+
         if (failedRepos.length > 0) {
           toast.error(
             `⚠️ ${failedRepos.length}個のリポジトリの追加に失敗しました`,
             { duration: 4000 }
           );
         } else if (successCount === reposToAdd.length) {
-          toast.success(
-            `✅ 全てのリポジトリをキューに追加完了！`,
-            { duration: 2000 }
-          );
+          toast.success(`✅ 全てのリポジトリをキューに追加完了！`, {
+            duration: 2000,
+          });
         }
-        
+
+        // 全てのリポジトリ追加完了後にワーカーをpingして連続処理開始
+        if (successCount > 0) {
+          try {
+            const { hackathonOperations } = await import("@/lib/supabase");
+            console.log("🔔 Triggering worker to process all queued repositories...");
+            await hackathonOperations.triggerWorkerProcessing();
+            console.log("✅ Worker processing triggered for batch");
+          } catch (workerError) {
+            console.error("⚠️ Failed to trigger worker processing:", workerError);
+          }
+        }
+
         // 完了後に再度データを更新
         loadHackathonDetails();
       });
-      
     } catch (error) {
       console.error("❌ Error initiating repository addition:", error);
       // 初期化エラーの場合のみ表示（既に画面は戻っている）
@@ -859,7 +883,7 @@ export default function HackathonDetailPage() {
                         <div className="flex-1">
                           <div className="font-medium text-lg">{repo}</div>
                           <div className="text-sm text-yellow-900 dark:text-yellow-100">
-                            Claude Codeによる解析を実行中...
+                            AIエージェントによる解析を実行中...
                           </div>
                         </div>
                         <div className="flex gap-2">
@@ -905,22 +929,29 @@ export default function HackathonDetailPage() {
             </CardContent>
           </Card>
 
-          {/* 分析中の場合 */}
-          {hackathon.status === "analyzing" && (
-            <Card className="border-yellow-500/20 bg-yellow-500/10">
-              <CardContent className="pt-6">
-                <div className="text-center space-y-4">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-500 mx-auto"></div>
-                  <div className="text-yellow-700 dark:text-yellow-300">
-                    Claude Code による解析を実行中です...
+          {/* 分析中の場合（pending/processingジョブがある場合のみ表示） */}
+          {(() => {
+            const hasProcessingJobs = hackathon.repositories.some(repo => {
+              const jobStatus = hackathon.repositoryJobStatus?.[repo];
+              return jobStatus === "pending" || jobStatus === "processing";
+            });
+            
+            return hasProcessingJobs && (
+              <Card className="border-yellow-500/20 bg-yellow-500/10">
+                <CardContent className="pt-6">
+                  <div className="text-center space-y-4">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-500 mx-auto"></div>
+                    <div className="text-yellow-700 dark:text-yellow-300">
+                      AIエージェント による解析を実行中です...
+                    </div>
+                    <div className="text-sm text-yellow-600 dark:text-yellow-400">
+                      このプロセスには数分から数十分かかる場合があります
+                    </div>
                   </div>
-                  <div className="text-sm text-yellow-600 dark:text-yellow-400">
-                    このプロセスには数分から数十分かかる場合があります
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+                </CardContent>
+              </Card>
+            );
+          })()}
 
           {/* エラーの場合 */}
           {hackathon.status === "failed" && (

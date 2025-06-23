@@ -175,16 +175,18 @@ export const hackathonOperations = {
         return { success: false, error: "ハッカソンが見つかりません" };
       }
 
-      // 関連するジョブからリポジトリリストを取得
+      // 関連するジョブからリポジトリリストと状態を取得
       const { data: jobs, error: jobsError } = await supabase
         .from("job_status")
-        .select("payload")
+        .select("payload, status")
         .eq("hackathon_id", hackathonId);
 
       if (jobsError) console.warn("Error loading jobs:", jobsError);
 
-      // すべてのリポジトリを重複なく取得
+      // すべてのリポジトリを重複なく取得し、job_statusと関連付け
       const allRepositories: string[] = [];
+      const repositoryJobStatus: { [repo: string]: string } = {};
+      
       jobs?.forEach((job) => {
         // 新しい構造（単一リポジトリ）と古い構造（複数リポジトリ）の両方に対応
         if (job.payload?.repository) {
@@ -193,6 +195,7 @@ export const hackathonOperations = {
           if (!allRepositories.includes(repo)) {
             allRepositories.push(repo);
           }
+          repositoryJobStatus[repo] = job.status;
         } else if (job.payload?.repositories) {
           // 古い構造: 複数のリポジトリ（後方互換性）
           const repos = job.payload.repositories || [];
@@ -200,6 +203,7 @@ export const hackathonOperations = {
             if (!allRepositories.includes(repo)) {
               allRepositories.push(repo);
             }
+            repositoryJobStatus[repo] = job.status;
           });
         }
       });
@@ -270,17 +274,52 @@ export const hackathonOperations = {
         };
       }
 
+      // 実際のリポジトリ評価状況に基づいて正確なステータスを計算
+      let actualStatus = hackathonData.status;
+      
+      if (allRepositories.length > 0) {
+        const completedRepositoriesCount = evaluationResults?.length || 0;
+        const totalRepositoriesCount = allRepositories.length;
+        
+        // job_statusで失敗したリポジトリの数をカウント
+        const failedRepositoriesCount = allRepositories.filter(repo => 
+          repositoryJobStatus[repo] === "failed"
+        ).length;
+        
+        // job_statusで処理中のリポジトリの数をカウント
+        const processingRepositoriesCount = allRepositories.filter(repo => 
+          repositoryJobStatus[repo] === "pending" || repositoryJobStatus[repo] === "processing"
+        ).length;
+        
+        if (completedRepositoriesCount === totalRepositoriesCount) {
+          // 全てのリポジトリが評価完了している場合のみ完了
+          actualStatus = "completed";
+        } else if (processingRepositoriesCount > 0) {
+          // pending または processing のリポジトリがある場合は分析中
+          actualStatus = "analyzing";
+        } else if (failedRepositoriesCount > 0 && completedRepositoriesCount === 0) {
+          // 全て失敗で完了済みが0の場合は失敗
+          actualStatus = "failed";
+        } else {
+          // 一部完了している場合は分析中
+          actualStatus = "analyzing";
+        }
+        
+        console.log(`📊 Status calculation: ${completedRepositoriesCount}/${totalRepositoriesCount} completed, ${failedRepositoriesCount} failed, ${processingRepositoriesCount} processing, status: ${actualStatus}`);
+      }
+
       // 最終的なハッカソン詳細オブジェクト
       const hackathonDetails = {
         id: hackathonData.id,
         name: hackathonData.name,
         repositories: allRepositories,
-        status: hackathonData.status,
+        repositoryJobStatus, // job_statusの状態を追加
+        status: actualStatus,
         score: hackathonData.average_score,
         rank: 1, // 今後ランキング機能を実装
         totalParticipants: 1, // 今後参加者数機能を実装
         createdAt: hackathonData.created_at,
-        completedAt,
+        completedAt: actualStatus === "completed" ? completedAt : null, // 完了時のみcompletedAtを設定
         results,
       };
 

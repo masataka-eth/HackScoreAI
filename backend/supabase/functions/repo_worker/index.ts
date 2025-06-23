@@ -58,130 +58,37 @@ serve(async (req) => {
         Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
       const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-      // Read message from queue
-      const { data: messages, error: readError } = await supabase.rpc(
-        "pgmq_read",
-        {
-          queue_name: "repo_analysis_queue",
-          visibility_timeout: 300, // 5 minutes visibility timeout
-          qty: 1,
-        }
-      );
-
-      if (readError) {
-        console.error("Failed to read from queue:", readError);
-        isProcessing = false;
-        return new Response(
-          JSON.stringify({
-            error: "Failed to read from queue",
-            details: readError,
-          }),
-          {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 500,
-          }
-        );
-      }
-
-      if (!messages || messages.length === 0) {
-        isProcessing = false;
-        return new Response(
-          JSON.stringify({
-            message: "No messages in queue",
-            processed: 0,
-          }),
-          {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 200,
-          }
-        );
-      }
-
-      const message = messages[0];
-      console.log("Processing message:", message.msg_id, message.message);
-
-      // Update job status to processing
-      await supabase
-        .from("job_status")
-        .update({
-          status: "processing",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("queue_message_id", message.msg_id);
+      // Trigger Cloud Run Worker to poll and process all queued jobs
+      console.log("🚀 Triggering Cloud Run Worker to poll and process all jobs...");
+      
+      const cloudRunUrl =
+        Deno.env.get("CLOUD_RUN_WORKER_URL") || "http://host.docker.internal:8080";
+      const authToken = Deno.env.get("CLOUD_RUN_AUTH_TOKEN") || "";
 
       try {
-        // Forward job to Cloud Run worker (without secrets) - Fire and forget
-        console.log("🚀 Starting Cloud Run processing (async)");
-
-        // Start processing in Cloud Run (don't await)
-        forwardToCloudRunWorker({
-          ...message.message,
-          // Don't send secrets over HTTP - Cloud Run will fetch them directly
-          requiresSecrets: true,
-        }).catch(async (error) => {
-          console.error("❌ Cloud Run processing failed:", error);
-          console.log("🔄 Attempting fallback processing within Edge Function");
-
-          try {
-            // Fallback: Process directly in Edge Function
-            await processFallback(message.message, supabase);
-            console.log("✅ Fallback processing completed successfully");
-
-            // Update job status to completed with fallback
-            await supabase
-              .from("job_status")
-              .update({
-                status: "completed",
-                result: {
-                  fallback: true,
-                  message:
-                    "Processed within Edge Function due to Cloud Run connectivity issues",
-                },
-                updated_at: new Date().toISOString(),
-              })
-              .eq("queue_message_id", message.msg_id);
-          } catch (fallbackError) {
-            console.error("❌ Fallback processing also failed:", fallbackError);
-            // Update job status to failed
-            await supabase
-              .from("job_status")
-              .update({
-                status: "failed",
-                error: `Cloud Run failed: ${error.message}. Fallback failed: ${fallbackError.message}`,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("queue_message_id", message.msg_id);
-          }
+        const response = await fetch(`${cloudRunUrl}/poll`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({}),
         });
 
-        // Immediately return success and delete from queue
-        const result = {
-          success: true,
-          message: "Job forwarded to Cloud Run worker",
-          cloudRunProcessing: true,
-        };
+        if (!response.ok) {
+          throw new Error(
+            `Cloud Run worker poll failed: ${response.status} ${response.statusText}`
+          );
+        }
 
-        // Update job status to completed
-        await supabase
-          .from("job_status")
-          .update({
-            status: "completed",
-            result: result,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("queue_message_id", message.msg_id);
-
-        // Delete message from queue
-        await supabase.rpc("pgmq_delete", {
-          queue_name: "repo_analysis_queue",
-          msg_id: message.msg_id,
-        });
-
+        const result = await response.json();
+        console.log("✅ Cloud Run Worker poll response:", result);
+        
         isProcessing = false;
         return new Response(
           JSON.stringify({
             success: true,
-            messageId: message.msg_id,
+            message: "Cloud Run Worker polling triggered",
             result: result,
           }),
           {
@@ -189,43 +96,13 @@ serve(async (req) => {
             status: 200,
           }
         );
-      } catch (processError) {
-        console.error("Processing error:", processError);
-
-        // Update job status to failed
-        await supabase
-          .from("job_status")
-          .update({
-            status: "failed",
-            error:
-              processError instanceof Error
-                ? processError.message
-                : "Unknown error",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("queue_message_id", message.msg_id);
-
-        // Archive failed message
-        await supabase.rpc("pgmq_archive", {
-          queue_name: "repo_analysis_queue",
-          msg_id: message.msg_id,
-        });
-
-        isProcessing = false;
-        return new Response(
-          JSON.stringify({
-            error: "Processing failed",
-            messageId: message.msg_id,
-            details:
-              processError instanceof Error
-                ? processError.message
-                : "Unknown error",
-          }),
-          {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 500,
-          }
-        );
+      } catch (pollError) {
+        console.error("❌ Failed to trigger Cloud Run Worker poll:", pollError);
+        
+        // Fallback to old single message processing behavior
+        console.log("🔄 Falling back to single message processing...");
+        
+        return await processLegacySingleMessage(supabase);
       }
     } finally {
       isProcessing = false;
@@ -237,6 +114,189 @@ serve(async (req) => {
     status: 405,
   });
 });
+
+// Legacy single message processing (fallback)
+async function processLegacySingleMessage(supabase: any) {
+  try {
+    // Read message from queue
+    const { data: messages, error: readError } = await supabase.rpc(
+      "pgmq_read",
+      {
+        queue_name: "repo_analysis_queue",
+        visibility_timeout: 300, // 5 minutes visibility timeout
+        qty: 1,
+      }
+    );
+
+    if (readError) {
+      console.error("Failed to read from queue:", readError);
+      return new Response(
+        JSON.stringify({
+          error: "Failed to read from queue",
+          details: readError,
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 500,
+        }
+      );
+    }
+
+    if (!messages || messages.length === 0) {
+      return new Response(
+        JSON.stringify({
+          message: "No messages in queue",
+          processed: 0,
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        }
+      );
+    }
+
+    const message = messages[0];
+    console.log("Processing message:", message.msg_id, message.message);
+
+    // Update job status to processing
+    await supabase
+      .from("job_status")
+      .update({
+        status: "processing",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("queue_message_id", message.msg_id);
+
+    try {
+      // Forward job to Cloud Run worker (without secrets) - Fire and forget
+      console.log("🚀 Starting Cloud Run processing (async)");
+
+      // Start processing in Cloud Run (don't await)
+      forwardToCloudRunWorker({
+        ...message.message,
+        // Don't send secrets over HTTP - Cloud Run will fetch them directly
+        requiresSecrets: true,
+      }).catch(async (error) => {
+        console.error("❌ Cloud Run processing failed:", error);
+        console.log("🔄 Attempting fallback processing within Edge Function");
+
+        try {
+          // Fallback: Process directly in Edge Function
+          await processFallback(message.message, supabase);
+          console.log("✅ Fallback processing completed successfully");
+
+          // Update job status to completed with fallback
+          await supabase
+            .from("job_status")
+            .update({
+              status: "completed",
+              result: {
+                fallback: true,
+                message:
+                  "Processed within Edge Function due to Cloud Run connectivity issues",
+              },
+              updated_at: new Date().toISOString(),
+            })
+            .eq("queue_message_id", message.msg_id);
+        } catch (fallbackError) {
+          console.error("❌ Fallback processing also failed:", fallbackError);
+          // Update job status to failed
+          await supabase
+            .from("job_status")
+            .update({
+              status: "failed",
+              error: `Cloud Run failed: ${error.message}. Fallback failed: ${fallbackError.message}`,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("queue_message_id", message.msg_id);
+        }
+      });
+
+      // Immediately return success and delete from queue
+      const result = {
+        success: true,
+        message: "Job forwarded to Cloud Run worker",
+        cloudRunProcessing: true,
+      };
+
+      // Update job status to completed
+      await supabase
+        .from("job_status")
+        .update({
+          status: "completed",
+          result: result,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("queue_message_id", message.msg_id);
+
+      // Delete message from queue
+      await supabase.rpc("pgmq_delete", {
+        queue_name: "repo_analysis_queue",
+        msg_id: message.msg_id,
+      });
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          messageId: message.msg_id,
+          result: result,
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        }
+      );
+    } catch (processError) {
+      console.error("Processing error:", processError);
+
+      // Update job status to failed
+      await supabase
+        .from("job_status")
+        .update({
+          status: "failed",
+          error:
+            processError instanceof Error
+              ? processError.message
+              : "Unknown error",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("queue_message_id", message.msg_id);
+
+      // Archive failed message
+      await supabase.rpc("pgmq_archive", {
+        queue_name: "repo_analysis_queue",
+        msg_id: message.msg_id,
+      });
+
+      return new Response(
+        JSON.stringify({
+          error: "Processing failed",
+          messageId: message.msg_id,
+          details:
+            processError instanceof Error
+              ? processError.message
+              : "Unknown error",
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 500,
+        }
+      );
+    }
+  } catch (error) {
+    console.error("Legacy processing error:", error);
+    return new Response(
+      JSON.stringify({
+        error: "Legacy processing failed",
+        details: error instanceof Error ? error.message : "Unknown error",
+      }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 500,
+      }
+    );
+  }
+}
 
 // Forward job to Cloud Run worker
 async function forwardToCloudRunWorker(jobPayload: any) {
