@@ -116,7 +116,8 @@ export default function RepositoryEvaluationDetailPage() {
             id: item.item_id,
             name: item.name,
             score: item.score,
-            max_score: item.max_score || 20, // デフォルト20点満点
+            // max_score: item.max_score || 5, // デフォルト5点満点
+            max_score: 5, // 固定で5点満点
             positives: item.positives || "",
             negatives: item.negatives || "",
           })) || [];
@@ -128,7 +129,8 @@ export default function RepositoryEvaluationDetailPage() {
             id: item.id || item.item_id || "",
             name: item.name || "",
             score: item.score || 0,
-            max_score: item.max_score || 20, // デフォルト20点満点
+            // max_score: item.max_score || 5, // デフォルト5点満点
+            max_score: 5, // 固定で5点満点
             positives: item.positives || "",
             negatives: item.negatives || "",
           }));
@@ -170,14 +172,14 @@ export default function RepositoryEvaluationDetailPage() {
 ## 📊 評価概要
 
 - **リポジトリ**: ${repository_name}
-- **総合スコア**: ${total_score}/100
+- **総合スコア**: ${total_score}/20
 - **評価日**: ${new Date(created_at).toLocaleString()}
 
 ## 📋 項目別評価
 
 ${evaluation_data.items
   .map(
-    (item) => `### ${item.name} - ${item.score} / ${item.max_score || 20}点
+    (item) => `### ${item.name} - ${item.score} / 5点
 
 #### ✨ 良かった点
 ${item.positives || "コメントなし"}
@@ -294,7 +296,7 @@ ${evaluation_data.overallComment}
                   <div className="text-4xl font-bold text-primary">
                     {evaluation.evaluation_data.totalScore}
                   </div>
-                  <div className="text-sm text-muted-foreground">/ 100点</div>
+                  <div className="text-sm text-muted-foreground">/ 20点</div>
                 </div>
                 <div className="text-right text-sm text-muted-foreground">
                   <div className="flex items-center gap-2">
@@ -328,7 +330,7 @@ ${evaluation_data.overallComment}
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-lg font-semibold">{item.name}</h3>
                     <div className="text-2xl font-bold text-primary">
-                      {item.score} / {item.max_score || 20}点
+                      {item.score} / 5点
                     </div>
                   </div>
 

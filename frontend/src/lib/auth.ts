@@ -32,7 +32,6 @@ export const auth = {
   },
 
   // セッション変更をリスニング
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onAuthStateChange(callback: (event: string, session: any) => void) {
     return supabase.auth.onAuthStateChange(callback)
   }

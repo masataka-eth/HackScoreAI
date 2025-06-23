@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { auth } from '@/lib/auth'
 import type { User, Session } from '@supabase/supabase-js'
+import { Toaster } from 'sonner'
 
 interface AuthContextType {
   user: User | null
@@ -57,6 +58,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider value={{ user, session, loading, signIn, signOut }}>
       {children}
+      <Toaster position="top-right" richColors />
     </AuthContext.Provider>
   )
 }
