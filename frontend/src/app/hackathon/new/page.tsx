@@ -282,7 +282,9 @@ export default function NewHackathonPage() {
         userId,
       });
 
-      if (result.success) {
+      console.log("🔍 Create hackathon result:", result);
+
+      if (result.success && result.data) {
         // ハッカソン登録成功後、自動的に評価処理を開始
         console.log(
           "✅ Hackathon registered successfully, starting evaluation automatically..."
@@ -314,10 +316,19 @@ export default function NewHackathonPage() {
         router.push("/dashboard");
       } else {
         console.error("Hackathon creation failed:", result);
-        const errorMsg =
-          (result.error as any)?.message ||
-          result.error ||
-          "ハッカソンの登録に失敗しました";
+        let errorMsg = "ハッカソンの登録に失敗しました";
+
+        if (result.error) {
+          if (typeof result.error === "string") {
+            errorMsg = result.error;
+          } else if (
+            typeof result.error === "object" &&
+            "message" in result.error
+          ) {
+            errorMsg = (result.error as any).message;
+          }
+        }
+
         throw new Error(errorMsg);
       }
     } catch (error) {

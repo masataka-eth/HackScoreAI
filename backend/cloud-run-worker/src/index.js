@@ -91,50 +91,67 @@ app.get("/test", (req, res) => {
 // Process single repository (HTTP trigger) - requires authentication
 app.post("/process", authenticateRequest, async (req, res) => {
   try {
-    const { repositories, userId, evaluationCriteria, jobId } = req.body;
+    console.log("🔍 Request body received:", JSON.stringify(req.body, null, 2));
+    const { repository, userId, evaluationCriteria, jobId, hackathonId } =
+      req.body;
 
-    console.log(`🔍 Processing job ${jobId} for repositories:`, repositories);
+    console.log(
+      `🔍 Processing job ${jobId} for hackathon ${hackathonId} with repository:`,
+      repository
+    );
+
+    // Ensure job_status record exists
+    await ensureJobStatus(jobId, userId, { ...req.body, hackathonId });
 
     // Get user secrets directly from Supabase Vault (secure)
     const secrets = await getUserSecrets(userId);
 
-    // Process each repository with ClaudeCode
-    const results = [];
-    for (const repoName of repositories) {
-      const result = await processRepositoryWithClaudeCode(
-        repoName,
-        secrets,
-        evaluationCriteria
-      );
+    // Process the single repository with ClaudeCode
+    const result = await processRepositoryWithClaudeCode(
+      repository,
+      secrets,
+      evaluationCriteria
+    );
 
-      if (result.success) {
+    if (result.success) {
+      try {
         // Save to Supabase database
         await saveEvaluationResult(
           jobId,
           userId,
-          repoName,
+          repository,
           result.evaluation,
           result.metadata
         );
+      } catch (saveError) {
+        console.error(
+          `Failed to save evaluation result for ${repository}:`,
+          saveError
+        );
+        result.success = false;
+        result.error = `Failed to save evaluation: ${saveError.message}`;
       }
-
-      results.push({
-        repository: repoName,
-        success: result.success,
-        error: result.error,
-        totalScore: result.evaluation?.totalScore,
-      });
     }
 
     // Update job status in Supabase
-    await updateJobStatus(jobId, "completed", { results });
+    const status = result.success ? "completed" : "failed";
+    await updateJobStatus(jobId, status, {
+      repository,
+      success: result.success,
+      error: result.error,
+      totalScore: result.evaluation?.totalScore,
+    });
 
     res.json({
       success: true,
       jobId,
-      results,
-      processedRepositories: results.length,
-      successfulAnalyses: results.filter((r) => r.success).length,
+      hackathonId,
+      repository,
+      result: {
+        success: result.success,
+        error: result.error,
+        totalScore: result.evaluation?.totalScore,
+      },
     });
   } catch (error) {
     console.error("Error processing job:", error);
@@ -156,21 +173,41 @@ app.post("/poll", authenticateRequest, async (req, res) => {
     console.log("📥 Polling for jobs...");
 
     // Read from pgmq queue
+    console.log("🔍 Reading from pgmq queue with params:", {
+      queue_name: "repo_analysis_queue",
+      visibility_timeout: 300,
+      qty: 1,
+    });
+
     const { data: messages, error } = await supabase.rpc("pgmq_read", {
       queue_name: "repo_analysis_queue",
       visibility_timeout: 300,
+      qty: 1,
+    });
+
+    console.log("🔍 Queue read result:", {
+      messages: messages ? messages.length : 0,
+      error: error?.message || null,
     });
 
     if (error) {
+      console.error("❌ Queue read error details:", error);
       throw new Error(`Queue read error: ${error.message}`);
     }
 
     if (!messages || messages.length === 0) {
+      console.log("ℹ️ No messages in queue - returning empty result");
       return res.json({ message: "No jobs in queue" });
     }
 
     const message = messages[0];
     console.log("📨 Processing message:", message.msg_id);
+    console.log(
+      "🔍 Message content:",
+      JSON.stringify(message.message, null, 2)
+    );
+    console.log("🔍 Request host header:", req.get("host"));
+    console.log("🔍 Request protocol:", req.protocol);
 
     // Update job status to processing
     await updateJobStatus(message.message.jobId, "processing");
@@ -178,24 +215,40 @@ app.post("/poll", authenticateRequest, async (req, res) => {
     try {
       // Process the job
       const processResult = await fetch(
-        `${req.protocol}://${req.get("host")}/process`,
+        `http://localhost:${config.server.port}/process`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${config.auth.token}`,
+          },
           body: JSON.stringify(message.message),
         }
       );
 
       if (processResult.ok) {
+        console.log("✅ Job processing completed successfully");
         // Delete message from queue on success
         await supabase.rpc("pgmq_delete", {
           queue_name: "repo_analysis_queue",
           msg_id: message.msg_id,
         });
       } else {
+        console.error(
+          `❌ Job processing failed with status: ${processResult.status}`
+        );
+        // Update job status to failed
+        await updateJobStatus(message.message.jobId, "failed", {
+          error: `Process endpoint returned status ${processResult.status}`,
+        });
         throw new Error(`Process failed with status: ${processResult.status}`);
       }
     } catch (processError) {
+      console.error(`❌ Job processing exception:`, processError);
+      // Update job status to failed
+      await updateJobStatus(message.message.jobId, "failed", {
+        error: processError.message || "Unknown processing error",
+      });
       // Archive failed message
       await supabase.rpc("pgmq_archive", {
         queue_name: "repo_analysis_queue",
@@ -552,6 +605,25 @@ async function saveEvaluationResult(
   return data;
 }
 
+async function ensureJobStatus(jobId, userId, payload) {
+  // First try to insert the job status record if it doesn't exist
+  const { error: insertError } = await supabase.from("job_status").insert({
+    id: jobId,
+    status: "processing",
+    payload: payload,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+
+  if (insertError) {
+    // If insert fails due to conflict, that's fine - record already exists
+    if (insertError.code !== "23505") {
+      // Not a unique constraint violation
+      console.error("Failed to ensure job status record:", insertError);
+    }
+  }
+}
+
 async function updateJobStatus(jobId, status, result = null) {
   const { error } = await supabase
     .from("job_status")
@@ -571,7 +643,7 @@ async function updateJobStatus(jobId, status, result = null) {
 console.log(`🔍 DEBUG: About to start server on port ${config.server.port}`);
 console.log(`🔍 DEBUG: Config object:`, JSON.stringify(config, null, 2));
 
-const server = app.listen(config.server.port, '0.0.0.0', (err) => {
+const server = app.listen(config.server.port, "0.0.0.0", (err) => {
   if (err) {
     console.error(`❌ Server failed to start:`, err);
     process.exit(1);
@@ -587,10 +659,10 @@ const server = app.listen(config.server.port, '0.0.0.0', (err) => {
   console.log(`🔍 DEBUG: Server address:`, server.address());
 });
 
-server.on('error', (err) => {
+server.on("error", (err) => {
   console.error(`❌ Server error:`, err);
 });
 
-server.on('listening', () => {
+server.on("listening", () => {
   console.log(`🎯 Server is now listening on port ${config.server.port}`);
 });

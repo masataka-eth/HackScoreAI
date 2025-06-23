@@ -30,6 +30,7 @@ import {
   Plus,
   Trash2,
   RefreshCw,
+  AlertCircle,
 } from "lucide-react";
 import { OctocatCharacter } from "@/components/octocat-character";
 import { BinaryBackground } from "@/components/binary-background";
@@ -68,7 +69,7 @@ interface RepositoryEvaluation {
 
 interface RepositoryStatus {
   repository_name: string;
-  status: "completed" | "evaluating";
+  status: "completed" | "evaluating" | "failed";
   evaluation?: RepositoryEvaluation;
   rank?: number;
 }
@@ -85,7 +86,7 @@ export default function HackathonDetailPage() {
     RepositoryStatus[]
   >([]);
   const [isLoading, setIsLoading] = useState(true);
-  
+
   // リポジトリ追加関連のstate
   const [isAddRepositoryOpen, setIsAddRepositoryOpen] = useState(false);
   const [githubOrg, setGithubOrg] = useState("");
@@ -121,25 +122,28 @@ export default function HackathonDetailPage() {
         }
 
         // 評価サマリーを取得（順位表示用）
-        const { data: evaluationSummary, error } = await supabase.rpc(
-          "get_evaluation_summary",
-          {
-            p_user_id: user.id,
-          }
-        );
+        const { data: evaluationSummary, error } = await supabase
+          .from("evaluation_results")
+          .select(
+            "id, repository_name, total_score, created_at, job_id, evaluation_data"
+          )
+          .eq("hackathon_id", params.id)
+          .order("total_score", { ascending: false });
 
         if (evaluationSummary && !error) {
-          // 現在のジョブに関連するリポジトリの評価結果をフィルタリング
-          const currentJobEvaluations = evaluationSummary.filter(
-            (evaluation: any) => evaluation.job_id === params.id
+          // overall_commentを含む形式に変換
+          const formattedEvaluations = evaluationSummary.map(
+            (evaluation: any) => ({
+              id: evaluation.id,
+              repository_name: evaluation.repository_name,
+              total_score: evaluation.total_score,
+              overall_comment: evaluation.evaluation_data?.overallComment || "",
+              created_at: evaluation.created_at,
+              job_id: evaluation.job_id,
+            })
           );
 
-          // スコア順に並び替え（降順）
-          const sortedEvaluations = currentJobEvaluations.sort(
-            (a: any, b: any) => b.total_score - a.total_score
-          );
-
-          setRepositoryEvaluations(sortedEvaluations);
+          setRepositoryEvaluations(formattedEvaluations);
 
           // ハッカソンデータが取得できている場合、全リポジトリの状態を構築
           if (result.success && result.data) {
@@ -147,7 +151,7 @@ export default function HackathonDetailPage() {
             const repositoryStatusList: RepositoryStatus[] = [];
 
             // 評価完了済みリポジトリを追加
-            sortedEvaluations.forEach((evaluation: any, index: number) => {
+            formattedEvaluations.forEach((evaluation: any, index: number) => {
               repositoryStatusList.push({
                 repository_name: evaluation.repository_name,
                 status: "completed",
@@ -156,15 +160,23 @@ export default function HackathonDetailPage() {
               });
             });
 
-            // 評価中のリポジトリを追加
+            // 評価中または失敗したリポジトリを追加
             allRepositories.forEach((repoName: string) => {
-              const isCompleted = sortedEvaluations.some(
+              const isRepoEvaluated = formattedEvaluations.some(
                 (evaluation: any) => evaluation.repository_name === repoName
               );
-              if (!isCompleted) {
+              if (!isRepoEvaluated) {
+                // ハッカソンのステータスに基づいて判定
+                let status: "evaluating" | "failed" = "evaluating";
+
+                // 完了済みハッカソンで評価がない場合は失敗
+                if (result.data?.status === "completed") {
+                  status = "failed";
+                }
+
                 repositoryStatusList.push({
                   repository_name: repoName,
-                  status: "evaluating",
+                  status: status,
                 });
               }
             });
@@ -199,23 +211,28 @@ export default function HackathonDetailPage() {
   // GitHubリポジトリ一覧を取得
   const loadGitHubRepositories = async () => {
     if (!githubOrg.trim()) return;
-    
+
     setIsLoadingRepos(true);
     try {
       const { vaultOperations } = await import("@/lib/supabase");
       const result = await vaultOperations.getKey(user!.id, "github_token");
-      
+
       if (!result.success || !result.data) {
-        alert("GitHubトークンが設定されていません。設定ページで設定してください。");
+        alert(
+          "GitHubトークンが設定されていません。設定ページで設定してください。"
+        );
         return;
       }
 
-      const response = await fetch(`https://api.github.com/orgs/${githubOrg}/repos?type=all&per_page=100`, {
-        headers: {
-          Authorization: `Bearer ${result.data}`,
-          Accept: "application/vnd.github.v3+json",
-        },
-      });
+      const response = await fetch(
+        `https://api.github.com/orgs/${githubOrg}/repos?type=all&per_page=100`,
+        {
+          headers: {
+            Authorization: `Bearer ${result.data}`,
+            Accept: "application/vnd.github.v3+json",
+          },
+        }
+      );
 
       if (!response.ok) {
         throw new Error(`GitHub API エラー: ${response.status}`);
@@ -223,11 +240,13 @@ export default function HackathonDetailPage() {
 
       const repos = await response.json();
       const repoNames = repos.map((repo: any) => repo.full_name);
-      
+
       // 既存のリポジトリを除外
       const existingRepos = hackathon?.repositories || [];
-      const newRepos = repoNames.filter((repo: string) => !existingRepos.includes(repo));
-      
+      const newRepos = repoNames.filter(
+        (repo: string) => !existingRepos.includes(repo)
+      );
+
       setAvailableRepos(newRepos);
     } catch (error) {
       console.error("Error loading repositories:", error);
@@ -240,56 +259,90 @@ export default function HackathonDetailPage() {
   // リポジトリを追加
   const handleAddRepositories = async () => {
     if (selectedRepos.length === 0) return;
-    
+
     setIsAddingRepositories(true);
+    let successCount = 0;
+    let failedRepos: string[] = [];
+
     try {
       const { hackathonOperations } = await import("@/lib/supabase");
-      
+
       // 選択されたリポジトリを順番に追加
       for (const repo of selectedRepos) {
-        const result = await hackathonOperations.addRepositoryToHackathon(
-          params.id as string,
-          repo
-        );
-        
-        if (!result.success) {
-          console.error(`Failed to add repository ${repo}:`, result.error);
-          alert(`リポジトリ ${repo} の追加に失敗しました`);
+        try {
+          const result = await hackathonOperations.addRepositoryToHackathon(
+            params.id as string,
+            repo
+          );
+
+          if (result.success) {
+            successCount++;
+          } else {
+            console.error(`Failed to add repository ${repo}:`, result.error);
+            failedRepos.push(repo);
+          }
+        } catch (error) {
+          console.error(`Error adding repository ${repo}:`, error);
+          failedRepos.push(repo);
         }
       }
-      
-      // モーダルを閉じて状態をリセット
-      setIsAddRepositoryOpen(false);
-      setGithubOrg("");
-      setAvailableRepos([]);
-      setSelectedRepos([]);
-      
-      // ハッカソン詳細を再読み込み
-      setTimeout(() => {
-        window.location.reload();
-      }, 1000);
-      
+
+      // 結果のサマリーを表示
+      if (successCount > 0) {
+        if (failedRepos.length > 0) {
+          alert(
+            `${successCount}個のリポジトリを追加しました。\n失敗: ${failedRepos.join(
+              ", "
+            )}`
+          );
+        } else {
+          alert(`${successCount}個のリポジトリを追加しました。`);
+        }
+
+        // 成功した場合のみモーダルを閉じる
+        setIsAddRepositoryOpen(false);
+        setGithubOrg("");
+        setAvailableRepos([]);
+        setSelectedRepos([]);
+
+        // 状態をリセットしてから再読み込み
+        setIsAddingRepositories(false);
+
+        // ハッカソン詳細を再読み込み
+        setTimeout(() => {
+          window.location.reload();
+        }, 500);
+      } else {
+        // すべて失敗した場合
+        alert(
+          `リポジトリの追加に失敗しました。\n失敗: ${failedRepos.join(", ")}`
+        );
+        setIsAddingRepositories(false);
+      }
     } catch (error) {
       console.error("Error adding repositories:", error);
       alert("リポジトリの追加に失敗しました");
-    } finally {
       setIsAddingRepositories(false);
     }
   };
 
   // リポジトリを削除
   const handleRemoveRepository = async (repositoryName: string) => {
-    if (!confirm(`リポジトリ「${repositoryName}」を削除しますか？関連する評価結果も削除されます。`)) {
+    if (
+      !confirm(
+        `リポジトリ「${repositoryName}」を削除しますか？関連する評価結果も削除されます。`
+      )
+    ) {
       return;
     }
-    
+
     try {
       const { hackathonOperations } = await import("@/lib/supabase");
       const result = await hackathonOperations.removeRepositoryFromHackathon(
         params.id as string,
         repositoryName
       );
-      
+
       if (result.success) {
         // ハッカソン詳細を再読み込み
         window.location.reload();
@@ -310,7 +363,7 @@ export default function HackathonDetailPage() {
         params.id as string,
         repositoryName
       );
-      
+
       if (result.success) {
         alert("リポジトリの再分析を開始しました");
         // ハッカソン詳細を再読み込み
@@ -509,14 +562,26 @@ export default function HackathonDetailPage() {
                   <Trophy className="w-5 h-5 text-primary" />
                   リポジトリ順位
                 </div>
-                <Dialog open={isAddRepositoryOpen} onOpenChange={setIsAddRepositoryOpen}>
+                <Dialog
+                  open={isAddRepositoryOpen}
+                  onOpenChange={(open) => {
+                    setIsAddRepositoryOpen(open);
+                    // ダイアログを閉じる時は状態をリセット
+                    if (!open) {
+                      setGithubOrg("");
+                      setAvailableRepos([]);
+                      setSelectedRepos([]);
+                      setIsAddingRepositories(false);
+                    }
+                  }}
+                >
                   <DialogTrigger asChild>
                     <Button size="sm" className="flex items-center gap-2">
                       <Plus className="w-4 h-4" />
                       リポジトリを追加
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="sm:max-w-md">
+                  <DialogContent className="max-w-[90vw] sm:max-w-xl">
                     <DialogHeader>
                       <DialogTitle>リポジトリを追加</DialogTitle>
                       <DialogDescription>
@@ -532,36 +597,47 @@ export default function HackathonDetailPage() {
                             placeholder="例: microsoft"
                             value={githubOrg}
                             onChange={(e) => setGithubOrg(e.target.value)}
+                            className="flex-1"
                           />
-                          <Button 
+                          <Button
                             onClick={loadGitHubRepositories}
                             disabled={isLoadingRepos || !githubOrg.trim()}
+                            className="whitespace-nowrap"
                           >
                             {isLoadingRepos ? "読み込み中..." : "取得"}
                           </Button>
                         </div>
                       </div>
-                      
+
                       {availableRepos.length > 0 && (
                         <div className="space-y-2">
                           <Label>リポジトリを選択</Label>
-                          <div className="max-h-48 overflow-y-auto space-y-2 border rounded p-2">
+                          <div className="max-h-60 overflow-y-auto space-y-2 border rounded-lg p-3 bg-background/50">
                             {availableRepos.map((repo) => (
-                              <div key={repo} className="flex items-center space-x-2">
+                              <div
+                                key={repo}
+                                className="flex items-start space-x-2 hover:bg-accent/50 rounded p-1 transition-colors"
+                              >
                                 <Checkbox
                                   id={repo}
                                   checked={selectedRepos.includes(repo)}
                                   onCheckedChange={(checked) => {
                                     if (checked) {
-                                      setSelectedRepos([...selectedRepos, repo]);
+                                      setSelectedRepos([
+                                        ...selectedRepos,
+                                        repo,
+                                      ]);
                                     } else {
-                                      setSelectedRepos(selectedRepos.filter(r => r !== repo));
+                                      setSelectedRepos(
+                                        selectedRepos.filter((r) => r !== repo)
+                                      );
                                     }
                                   }}
+                                  className="mt-0.5 flex-shrink-0"
                                 />
-                                <Label 
+                                <Label
                                   htmlFor={repo}
-                                  className="text-sm font-normal cursor-pointer"
+                                  className="text-sm font-normal cursor-pointer flex-1 break-all leading-relaxed"
                                 >
                                   {repo}
                                 </Label>
@@ -569,28 +645,37 @@ export default function HackathonDetailPage() {
                             ))}
                           </div>
                           <p className="text-sm text-muted-foreground">
-                            {selectedRepos.length} 個のリポジトリが選択されています
+                            {selectedRepos.length}{" "}
+                            個のリポジトリが選択されています
                           </p>
                         </div>
                       )}
                     </div>
-                    <DialogFooter>
-                      <Button 
-                        variant="outline" 
+                    <DialogFooter className="flex-col sm:flex-row gap-2">
+                      <Button
+                        variant="outline"
                         onClick={() => {
                           setIsAddRepositoryOpen(false);
                           setGithubOrg("");
                           setAvailableRepos([]);
                           setSelectedRepos([]);
+                          setIsAddingRepositories(false);
                         }}
+                        className="w-full sm:w-auto"
+                        disabled={false}
                       >
                         キャンセル
                       </Button>
-                      <Button 
+                      <Button
                         onClick={handleAddRepositories}
-                        disabled={selectedRepos.length === 0 || isAddingRepositories}
+                        disabled={
+                          selectedRepos.length === 0 || isAddingRepositories
+                        }
+                        className="w-full sm:w-auto"
                       >
-                        {isAddingRepositories ? "追加中..." : `${selectedRepos.length}個を追加`}
+                        {isAddingRepositories
+                          ? "追加中..."
+                          : `${selectedRepos.length}個を追加`}
                       </Button>
                     </DialogFooter>
                   </DialogContent>
@@ -602,6 +687,8 @@ export default function HackathonDetailPage() {
                 {repositoryStatuses.length > 0
                   ? repositoryStatuses.map((repoStatus, index) => {
                       const isCompleted = repoStatus.status === "completed";
+                      const isFailed = repoStatus.status === "failed";
+                      const isEvaluating = repoStatus.status === "evaluating";
                       const isClickable = isCompleted && repoStatus.evaluation;
 
                       return (
@@ -612,8 +699,12 @@ export default function HackathonDetailPage() {
                               ? "hover:bg-accent/50 cursor-pointer"
                               : ""
                           } ${
-                            !isCompleted
+                            isEvaluating
                               ? "bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800"
+                              : ""
+                          } ${
+                            isFailed
+                              ? "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800"
                               : ""
                           }`}
                           onClick={() => {
@@ -633,23 +724,35 @@ export default function HackathonDetailPage() {
                                   #{repoStatus.rank}
                                 </div>
                               </>
-                            ) : (
+                            ) : isEvaluating ? (
                               <div className="flex items-center gap-2">
                                 <Loader2 className="w-5 h-5 animate-spin text-yellow-600" />
                                 <div className="text-lg font-bold text-yellow-900 dark:text-yellow-100">
                                   評価中
                                 </div>
                               </div>
-                            )}
+                            ) : isFailed ? (
+                              <div className="flex items-center gap-2">
+                                <AlertCircle className="w-5 h-5 text-red-600" />
+                                <div className="text-lg font-bold text-red-900 dark:text-red-100">
+                                  失敗
+                                </div>
+                              </div>
+                            ) : null}
                           </div>
                           <GitBranch className="w-4 h-4 text-muted-foreground" />
                           <div className="flex-1">
                             <div className="font-medium text-lg">
                               {repoStatus.repository_name}
                             </div>
-                            {!isCompleted && (
+                            {isEvaluating && (
                               <div className="text-sm text-yellow-900 dark:text-yellow-100">
                                 AIエージェントによる解析を実行中...
+                              </div>
+                            )}
+                            {isFailed && (
+                              <div className="text-sm text-red-900 dark:text-red-100">
+                                評価結果の保存に失敗しました
                               </div>
                             )}
                           </div>
@@ -659,14 +762,16 @@ export default function HackathonDetailPage() {
                             </div>
                           )}
                           <div className="flex gap-2">
-                            {/* 失敗の場合は再実行ボタンを表示 */}
-                            {!isCompleted && (
+                            {/* 失敗または評価中の場合は再実行ボタンを表示 */}
+                            {(isEvaluating || isFailed) && (
                               <Button
                                 variant="outline"
                                 size="sm"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleRetryRepository(repoStatus.repository_name);
+                                  handleRetryRepository(
+                                    repoStatus.repository_name
+                                  );
                                 }}
                                 title="再実行"
                               >
@@ -691,7 +796,9 @@ export default function HackathonDetailPage() {
                               size="sm"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleRemoveRepository(repoStatus.repository_name);
+                                handleRemoveRepository(
+                                  repoStatus.repository_name
+                                );
                               }}
                               className="text-red-500 hover:text-red-700"
                               title="削除"
@@ -737,7 +844,10 @@ export default function HackathonDetailPage() {
                             variant="outline"
                             size="sm"
                             onClick={() =>
-                              window.open(`https://github.com/${repo}`, "_blank")
+                              window.open(
+                                `https://github.com/${repo}`,
+                                "_blank"
+                              )
                             }
                           >
                             <ExternalLink className="w-4 h-4" />

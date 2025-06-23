@@ -19,49 +19,71 @@ serve(async (req: Request) => {
     if (!authHeader) {
       return new Response(
         JSON.stringify({ error: "Missing authorization header" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
 
     // Verify user from JWT
     const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser(token);
+
     if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: "Invalid token" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "Invalid token" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Parse request body
-    const { jobId, repositoryName } = await req.json();
+    const { hackathonId, repositoryName } = await req.json();
 
-    if (!jobId || !repositoryName) {
+    if (!hackathonId || !repositoryName) {
       return new Response(
-        JSON.stringify({ error: "jobId and repositoryName are required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          error: "hackathonId and repositoryName are required",
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
 
-    console.log(`= Retrying repository ${repositoryName} for hackathon ${jobId} for user ${user.id}`);
+    console.log(
+      `🔄 Retrying repository ${repositoryName} in hackathon ${hackathonId} for user ${user.id}`
+    );
 
     // Retry repository using database function
-    const { data, error: retryError } = await supabase.rpc("retry_failed_repository", {
-      p_hackathon_id: jobId,
-      p_repository_name: repositoryName,
-      p_user_id: user.id,
-    });
+    const { data, error: retryError } = await supabase.rpc(
+      "retry_failed_repository",
+      {
+        p_hackathon_id: hackathonId,
+        p_repository_name: repositoryName,
+        p_user_id: user.id,
+      }
+    );
 
     if (retryError) {
       console.error("Failed to retry repository:", retryError);
       return new Response(
-        JSON.stringify({ error: "Failed to retry repository", details: retryError.message }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          error: "Failed to retry repository",
+          details: retryError.message,
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
 
-    console.log(` Repository retry queued successfully: ${JSON.stringify(data)}`);
+    console.log(`✅ Repository retry initiated successfully`);
 
     // Trigger Cloud Run worker ping
     const cloudRunUrl = Deno.env.get("CLOUD_RUN_WORKER_URL");
@@ -70,7 +92,7 @@ serve(async (req: Request) => {
         const pingResponse = await fetch(`${cloudRunUrl}/poll`, {
           method: "POST",
           headers: {
-            "Authorization": `Bearer ${Deno.env.get("CLOUD_RUN_AUTH_TOKEN")}`,
+            Authorization: `Bearer ${Deno.env.get("CLOUD_RUN_AUTH_TOKEN")}`,
             "Content-Type": "application/json",
           },
         });
@@ -78,7 +100,7 @@ serve(async (req: Request) => {
         if (!pingResponse.ok) {
           console.error(`Worker ping failed: ${pingResponse.status}`);
         } else {
-          console.log(" Worker pinged successfully");
+          console.log("✅ Worker pinged successfully");
         }
       } catch (pingError) {
         console.error("Failed to ping worker:", pingError);
@@ -88,9 +110,9 @@ serve(async (req: Request) => {
 
     return new Response(
       JSON.stringify({
-        success: data,
-        message: "Repository retry queued successfully",
-        jobId,
+        success: true,
+        message: "Repository retry initiated successfully",
+        hackathonId,
         repositoryName,
       }),
       {
@@ -101,8 +123,14 @@ serve(async (req: Request) => {
   } catch (error) {
     console.error("Unexpected error:", error);
     return new Response(
-      JSON.stringify({ error: "Internal server error", details: error.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({
+        error: "Internal server error",
+        details: error.message,
+      }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
     );
   }
 });

@@ -19,54 +19,72 @@ serve(async (req: Request) => {
     if (!authHeader) {
       return new Response(
         JSON.stringify({ error: "Missing authorization header" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
 
     // Verify user from JWT
     const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser(token);
+
     if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: "Invalid token" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "Invalid token" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Parse request body
-    const { jobId } = await req.json();
+    const { hackathonId } = await req.json();
 
-    if (!jobId) {
+    if (!hackathonId) {
       return new Response(
-        JSON.stringify({ error: "jobId is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: "hackathonId is required" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
 
-    console.log(`🗑️ Deleting hackathon ${jobId} for user ${user.id}`);
+    console.log(`🗑️ Deleting hackathon ${hackathonId} for user ${user.id}`);
 
     // Delete hackathon using database function
-    const { data, error: deleteError } = await supabase.rpc("delete_hackathon", {
-      p_hackathon_id: jobId,
-      p_user_id: user.id,
-    });
+    const { data, error: deleteError } = await supabase.rpc(
+      "delete_hackathon",
+      {
+        p_hackathon_id: hackathonId,
+        p_user_id: user.id,
+      }
+    );
 
     if (deleteError) {
       console.error("Failed to delete hackathon:", deleteError);
       return new Response(
-        JSON.stringify({ error: "Failed to delete hackathon", details: deleteError.message }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          error: "Failed to delete hackathon",
+          details: deleteError.message,
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
 
-    console.log(`✅ Hackathon deleted successfully: ${JSON.stringify(data)}`);
+    console.log(`✅ Hackathon deleted successfully`);
 
     return new Response(
       JSON.stringify({
-        success: data,
+        success: true,
         message: "Hackathon deleted successfully",
-        jobId,
+        hackathonId,
       }),
       {
         status: 200,
@@ -76,8 +94,14 @@ serve(async (req: Request) => {
   } catch (error) {
     console.error("Unexpected error:", error);
     return new Response(
-      JSON.stringify({ error: "Internal server error", details: error.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({
+        error: "Internal server error",
+        details: error.message,
+      }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
     );
   }
 });
