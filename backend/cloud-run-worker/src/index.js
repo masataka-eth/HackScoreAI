@@ -671,12 +671,12 @@ GitHub MCP を使用して、GitHub リポジトリ "${repoName}" を詳細に�
 **出力形式（日本語で回答）:**
 
 {
-  "totalScore": 86,                // 0-100 の整数
+  "totalScore": 18,                // 0-20 の整数
   "items": [
     {
       "id": "1",
       "name": "テーマ適合度",        // 評価項目ラベル
-      "score": 8,                  // 整数（配分内）
+      "score": 4,                  // 整数（配分内 0-5）
       "positives": "...",        // 良かった点 (1-3 件をわかりやすい文章で記載)
       "negatives": "..."         // 改善点 (1-3 件をわかりやすい文章で記載)
     },
@@ -684,7 +684,7 @@ GitHub MCP を使用して、GitHub リポジトリ "${repoName}" を詳細に�
     {
       "id": "7",
       "name": "ドキュメント",
-      "score": 5,
+      "score": 2,
       "positives": "...",
       "negatives": "..."
     }
@@ -696,49 +696,49 @@ GitHub MCP を使用して、GitHub リポジトリ "${repoName}" を詳細に�
 ### 評価項目\_1
 テーマ適合度
 #### 配分
-10 点
+5 点
 #### 主な評価軸
 与えられたテーマや課題に対してどれだけ的確に応えているか
 
 ### 評価項目\_2
 独創性・革新性
 #### 配分
-20 点
+5 点
 #### 主な評価軸
 既存の解決策との差別化、新奇性、アイデアの意外性
 
 ### 評価項目\_3
 技術的完成度
 #### 配分
-20 点
+5 点
 #### 主な評価軸
 コード品質、技術スタックの妥当性、アルゴリズム／アーキテクチャの洗練度
 
 ### 評価項目\_4
 機能実装・完成度
 #### 配分
-15 点
+5 点
 #### 主な評価軸
 実際に「動く」かどうか、主要機能が一通り実装されているか
 
 ### 評価項目\_5
 ユーザー体験（UX/UI）
 #### 配分
-15 点
+5 点
 #### 主な評価軸
 直感的な操作性、デザインの一貫性、アクセシビリティ
 
 ### 評価項目\_6
 実世界インパクト／ビジネス価値
 #### 配分
-10 点
+5 点
 #### 主な評価軸
 社会的意義、市場規模、収益モデルの説得力
 
 ### 評価項目\_7
 ドキュメント
 #### 配分
-10 点
+5 点
 #### 主な評価軸
 README や API ドキュメントの充実度
 `;
@@ -835,12 +835,12 @@ GitHub MCP を使用して、GitHub リポジトリ "${repoName}" を詳細に�
 
 function buildTestAnalysisPrompt(repoName, evaluationCriteria) {
   const sampleResult = {
-    totalScore: 75,
+    totalScore: 16,
     items: [
       {
         id: "1",
         name: "テーマ適合度",
-        score: 8,
+        score: 4,
         positives:
           "テーマに対して明確な解決策を提示している。要件を満たす基本機能が実装されている。",
         negatives: "一部の機能がテーマから逸脱している部分がある。",
@@ -848,7 +848,7 @@ function buildTestAnalysisPrompt(repoName, evaluationCriteria) {
       {
         id: "2",
         name: "独創性・革新性",
-        score: 15,
+        score: 4,
         positives:
           "既存のソリューションとは異なるアプローチを採用。新しい技術の組み合わせが斬新。",
         negatives: "一部のアイデアは既存のサービスに類似している。",
@@ -856,7 +856,7 @@ function buildTestAnalysisPrompt(repoName, evaluationCriteria) {
       {
         id: "3",
         name: "技術的完成度",
-        score: 16,
+        score: 3,
         positives:
           "モダンな技術スタックを採用。コードの構造が整理されている。エラーハンドリングが適切。",
         negatives:
@@ -865,14 +865,14 @@ function buildTestAnalysisPrompt(repoName, evaluationCriteria) {
       {
         id: "4",
         name: "機能実装・完成度",
-        score: 11,
+        score: 2,
         positives: "主要機能は一通り動作する。基本的なユースケースをカバー。",
         negatives: "エッジケースの処理が不完全。一部の機能にバグが残っている。",
       },
       {
         id: "5",
         name: "ユーザー体験（UX/UI）",
-        score: 12,
+        score: 2,
         positives: "直感的なインターフェース。レスポンシブデザインに対応。",
         negatives:
           "一部のUI要素の配置が不自然。モバイル環境での操作性に改善の余地。",
@@ -880,14 +880,14 @@ function buildTestAnalysisPrompt(repoName, evaluationCriteria) {
       {
         id: "6",
         name: "実世界インパクト／ビジネス価値",
-        score: 7,
+        score: 1,
         positives: "明確なターゲットユーザーが存在。実用的な問題解決に貢献。",
         negatives: "市場規模の見積もりが不明確。収益化モデルの具体性に欠ける。",
       },
       {
         id: "7",
         name: "ドキュメント",
-        score: 6,
+        score: 0,
         positives:
           "READMEに基本的な説明がある。インストール手順が記載されている。",
         negatives:
@@ -973,16 +973,21 @@ function validateEvaluationResult(data) {
     return false;
   }
 
-  // Validate each item
+  // Validate each item (max score should be 5)
   for (const item of data.items) {
     if (
       !item.id ||
       !item.name ||
       typeof item.score !== "number" ||
+      item.score < 0 ||
+      item.score > 5 ||
       !item.positives ||
       !item.negatives
     ) {
-      console.error("❌ Validation failed: item missing required fields", item);
+      console.error(
+        "❌ Validation failed: item missing required fields or score out of range (0-5)",
+        item
+      );
       return false;
     }
   }
