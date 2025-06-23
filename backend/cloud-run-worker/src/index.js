@@ -447,29 +447,41 @@ app.post("/poll", authenticateRequest, async (req, res) => {
 
 async function getUserSecrets(userId) {
   console.log(`🔑 Retrieving secrets for user: ${userId}`);
-  
-  const { data: anthropicKey, error: anthropicError } = await supabase.rpc("get_secret_for_job", {
-    p_user_id: userId,
-    p_secret_type: "anthropic_key",
-  });
+
+  const { data: anthropicKey, error: anthropicError } = await supabase.rpc(
+    "get_secret_for_job",
+    {
+      p_user_id: userId,
+      p_secret_type: "anthropic_key",
+    }
+  );
 
   if (anthropicError) {
     console.error("❌ Failed to retrieve Anthropic API key:", anthropicError);
-    throw new Error(`Failed to retrieve Anthropic API key: ${anthropicError.message}`);
+    throw new Error(
+      `Failed to retrieve Anthropic API key: ${anthropicError.message}`
+    );
   }
 
   if (!anthropicKey) {
     console.error("❌ Anthropic API key not found for user:", userId);
-    throw new Error("Anthropic API key not found. Please save your key in the settings page.");
+    throw new Error(
+      "Anthropic API key not found. Please save your key in the settings page."
+    );
   }
 
   // Log partial key for debugging (first 10 chars only)
-  console.log(`✅ Anthropic API key retrieved: ${anthropicKey.substring(0, 10)}...`);
+  console.log(
+    `✅ Anthropic API key retrieved: ${anthropicKey.substring(0, 10)}...`
+  );
 
-  const { data: githubToken, error: githubError } = await supabase.rpc("get_secret_for_job", {
-    p_user_id: userId,
-    p_secret_type: "github_token",
-  });
+  const { data: githubToken, error: githubError } = await supabase.rpc(
+    "get_secret_for_job",
+    {
+      p_user_id: userId,
+      p_secret_type: "github_token",
+    }
+  );
 
   if (githubError) {
     console.error("❌ Failed to retrieve GitHub token:", githubError);
@@ -504,7 +516,12 @@ async function processRepositoryWithClaudeCode(
       throw new Error("Anthropic API key is missing");
     }
 
-    console.log(`🔐 Using API key: ${secrets.anthropicKey.substring(0, 10)}... for Claude Code`);
+    console.log(
+      `🔐 Using API key: ${secrets.anthropicKey.substring(
+        0,
+        10
+      )}... for Claude Code`
+    );
 
     const queryOptions = {
       prompt,
@@ -598,7 +615,8 @@ async function processRepositoryWithClaudeCode(
       console.error("  - Network connectivity issues");
       return {
         success: false,
-        error: "Claude Code process failed. Please check: 1) Your Anthropic API key is valid and saved in settings, 2) Your API key has Claude Code access, 3) Network connectivity",
+        error:
+          "Claude Code process failed. Please check: 1) Your Anthropic API key is valid and saved in settings, 2) Your API key has Claude Code access, 3) Network connectivity",
       };
     }
 
@@ -750,7 +768,7 @@ GitHub MCP を使用して、GitHub リポジトリ "${repoName}" を詳細に�
 4. 主要なソースコードファイルの内容を読み取り
 5. 評価する
 
-「市場優位性」の評価についてはマーケター目線でより多くのビジネス視点から分析してください。必要であればWEB検索をして調査してください。
+「市場優位性」の評価についてはマーケター目線でより多くのビジネス視点から分析してください。
 
 **出力形式（日本語で回答）:**
 
@@ -939,13 +957,19 @@ function validateEvaluationResult(data) {
     data.totalScore < 0 ||
     data.totalScore > 20
   ) {
-    console.error(`❌ Validation failed: totalScore is invalid (${data.totalScore}), expected 0-20`);
+    console.error(
+      `❌ Validation failed: totalScore is invalid (${data.totalScore}), expected 0-20`
+    );
     return false;
   }
 
   // Check items array (4 items for buildAnalysisPrompt_simple)
   if (!Array.isArray(data.items) || data.items.length !== 4) {
-    console.error(`❌ Validation failed: items array length is ${data.items?.length || 0}, expected 4`);
+    console.error(
+      `❌ Validation failed: items array length is ${
+        data.items?.length || 0
+      }, expected 4`
+    );
     return false;
   }
 

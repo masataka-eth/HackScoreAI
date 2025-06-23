@@ -194,8 +194,8 @@ export default function NewHackathonPage() {
       // 組織の場合は /orgs/{org}/repos、ユーザーの場合は /users/{user}/repos
       const apiUrl =
         org.type === "Organization"
-          ? `https://api.github.com/orgs/${org.login}/repos?sort=updated&per_page=100&type=all`
-          : `https://api.github.com/users/${org.login}/repos?sort=updated&per_page=100&type=all`;
+          ? `https://api.github.com/orgs/${org.login}/repos?sort=pushed&per_page=100&type=all`
+          : `https://api.github.com/users/${org.login}/repos?sort=pushed&per_page=100&type=all`;
 
       const response = await fetch(apiUrl, {
         headers: {

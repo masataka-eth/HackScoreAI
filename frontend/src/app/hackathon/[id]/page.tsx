@@ -246,7 +246,7 @@ export default function HackathonDetailPage() {
       }
 
       const response = await fetch(
-        `https://api.github.com/orgs/${githubOrg}/repos?type=all&per_page=100`,
+        `https://api.github.com/orgs/${githubOrg}/repos?type=all&per_page=100&sort=pushed`,
         {
           headers: {
             Authorization: `Bearer ${result.data}`,
