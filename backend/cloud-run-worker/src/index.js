@@ -295,7 +295,8 @@ async function processRepositoryWithClaudeCode(
   try {
     console.log(`🔍 Analyzing repository: ${repoName}`);
 
-    const prompt = buildAnalysisPrompt(repoName, evaluationCriteria);
+    //! const prompt = buildAnalysisPrompt(repoName, evaluationCriteria);
+    const prompt = buildTestAnalysisPrompt(repoName, evaluationCriteria);
     const abortController = new AbortController();
 
     // タイムアウト設定
@@ -510,6 +511,82 @@ GitHub MCP を使用して、GitHub リポジトリ "${repoName}" を詳細に�
 #### 主な評価軸
 README や API ドキュメントの充実度
 `;
+}
+
+function buildTestAnalysisPrompt(repoName, evaluationCriteria) {
+  const sampleResult = {
+    totalScore: 75,
+    items: [
+      {
+        id: "1",
+        name: "テーマ適合度",
+        score: 8,
+        positives:
+          "テーマに対して明確な解決策を提示している。要件を満たす基本機能が実装されている。",
+        negatives: "一部の機能がテーマから逸脱している部分がある。",
+      },
+      {
+        id: "2",
+        name: "独創性・革新性",
+        score: 15,
+        positives:
+          "既存のソリューションとは異なるアプローチを採用。新しい技術の組み合わせが斬新。",
+        negatives: "一部のアイデアは既存のサービスに類似している。",
+      },
+      {
+        id: "3",
+        name: "技術的完成度",
+        score: 16,
+        positives:
+          "モダンな技術スタックを採用。コードの構造が整理されている。エラーハンドリングが適切。",
+        negatives:
+          "一部のコードにリファクタリングの余地がある。テストカバレッジが不十分。",
+      },
+      {
+        id: "4",
+        name: "機能実装・完成度",
+        score: 11,
+        positives: "主要機能は一通り動作する。基本的なユースケースをカバー。",
+        negatives: "エッジケースの処理が不完全。一部の機能にバグが残っている。",
+      },
+      {
+        id: "5",
+        name: "ユーザー体験（UX/UI）",
+        score: 12,
+        positives: "直感的なインターフェース。レスポンシブデザインに対応。",
+        negatives:
+          "一部のUI要素の配置が不自然。モバイル環境での操作性に改善の余地。",
+      },
+      {
+        id: "6",
+        name: "実世界インパクト／ビジネス価値",
+        score: 7,
+        positives: "明確なターゲットユーザーが存在。実用的な問題解決に貢献。",
+        negatives: "市場規模の見積もりが不明確。収益化モデルの具体性に欠ける。",
+      },
+      {
+        id: "7",
+        name: "ドキュメント",
+        score: 6,
+        positives:
+          "READMEに基本的な説明がある。インストール手順が記載されている。",
+        negatives:
+          "APIドキュメントが不足。使用例やトラブルシューティングガイドが欠けている。",
+      },
+    ],
+    overallComment:
+      "このプロジェクトは、テーマに対して独創的なアプローチを採用し、技術的にもしっかりとした基盤を持っています。特に新しい技術の組み合わせによる革新性は高く評価できます。主要機能は概ね実装されており、ユーザーインターフェースも直感的です。ただし、細部の完成度にはまだ改善の余地があり、特にエッジケースの処理やドキュメントの充実が今後の課題となります。実世界での活用を考えると、より具体的なビジネスモデルの検討も必要でしょう。全体として、ハッカソンプロジェクトとしては良好な完成度を示していますが、実用化に向けてはさらなるブラッシュアップが必要です。（これはデバッグ用のサンプル評価です）",
+  };
+
+  return [
+    "このプロンプトはデバッグ用です。実際のリポジトリ分析は行わず、以下のサンプル評価結果をそのまま返してください。",
+    "",
+    `リポジトリ名: "${repoName}"`,
+    "",
+    "**以下のJSONをそのまま返してください:**",
+    "",
+    JSON.stringify(sampleResult, null, 2),
+  ].join("\n");
 }
 
 function extractJsonFromText(text) {
