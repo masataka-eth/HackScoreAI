@@ -330,7 +330,7 @@ ${evaluation_data.overallComment}
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-lg font-semibold">{item.name}</h3>
                     <div className="text-2xl font-bold text-primary">
-                      {item.score} / {item.max_score || 5}点
+                      {item.score} / 5点
                     </div>
                   </div>
 
