@@ -446,15 +446,35 @@ app.post("/poll", authenticateRequest, async (req, res) => {
 });
 
 async function getUserSecrets(userId) {
-  const { data: anthropicKey } = await supabase.rpc("get_secret_for_job", {
+  console.log(`🔑 Retrieving secrets for user: ${userId}`);
+  
+  const { data: anthropicKey, error: anthropicError } = await supabase.rpc("get_secret_for_job", {
     p_user_id: userId,
     p_secret_type: "anthropic_key",
   });
 
-  const { data: githubToken } = await supabase.rpc("get_secret_for_job", {
+  if (anthropicError) {
+    console.error("❌ Failed to retrieve Anthropic API key:", anthropicError);
+    throw new Error(`Failed to retrieve Anthropic API key: ${anthropicError.message}`);
+  }
+
+  if (!anthropicKey) {
+    console.error("❌ Anthropic API key not found for user:", userId);
+    throw new Error("Anthropic API key not found. Please save your key in the settings page.");
+  }
+
+  // Log partial key for debugging (first 10 chars only)
+  console.log(`✅ Anthropic API key retrieved: ${anthropicKey.substring(0, 10)}...`);
+
+  const { data: githubToken, error: githubError } = await supabase.rpc("get_secret_for_job", {
     p_user_id: userId,
     p_secret_type: "github_token",
   });
+
+  if (githubError) {
+    console.error("❌ Failed to retrieve GitHub token:", githubError);
+    throw new Error(`Failed to retrieve GitHub token: ${githubError.message}`);
+  }
 
   return { anthropicKey, githubToken };
 }
@@ -469,8 +489,8 @@ async function processRepositoryWithClaudeCode(
   try {
     console.log(`🔍 Analyzing repository: ${repoName}`);
 
+    // const prompt = buildAnalysisPrompt_simple(repoName, evaluationCriteria);
     const prompt = buildAnalysisPrompt_simple(repoName, evaluationCriteria);
-    // const prompt = buildTestAnalysisPrompt(repoName, evaluationCriteria);
     const abortController = new AbortController();
 
     // タイムアウト設定
@@ -478,6 +498,13 @@ async function processRepositoryWithClaudeCode(
       console.log(`⏰ Analysis timeout for ${repoName}, aborting...`);
       abortController.abort();
     }, config.processing.timeoutMs);
+
+    // Validate API key before proceeding
+    if (!secrets.anthropicKey) {
+      throw new Error("Anthropic API key is missing");
+    }
+
+    console.log(`🔐 Using API key: ${secrets.anthropicKey.substring(0, 10)}... for Claude Code`);
 
     const queryOptions = {
       prompt,
@@ -562,6 +589,18 @@ async function processRepositoryWithClaudeCode(
     };
   } catch (error) {
     console.error(`❌ Error analyzing ${repoName}:`, error);
+
+    // Claude Code process exit error
+    if (error.message.includes("exited with code 1")) {
+      console.error("❌ Claude Code process failed. Common causes:");
+      console.error("  - Invalid or missing Anthropic API key");
+      console.error("  - API key doesn't have Claude Code access");
+      console.error("  - Network connectivity issues");
+      return {
+        success: false,
+        error: "Claude Code process failed. Please check: 1) Your Anthropic API key is valid and saved in settings, 2) Your API key has Claude Code access, 3) Network connectivity",
+      };
+    }
 
     // エラーコード143の場合は特別な処理
     if (error.message.includes("exited with code 143")) {
@@ -889,20 +928,28 @@ function extractJsonFromText(text) {
 }
 
 function validateEvaluationResult(data) {
-  if (!data || typeof data !== "object") return false;
+  if (!data || typeof data !== "object") {
+    console.error("❌ Validation failed: data is not an object");
+    return false;
+  }
 
+  // Check totalScore (0-20 for buildAnalysisPrompt_simple)
   if (
     typeof data.totalScore !== "number" ||
     data.totalScore < 0 ||
-    data.totalScore > 100
+    data.totalScore > 20
   ) {
+    console.error(`❌ Validation failed: totalScore is invalid (${data.totalScore}), expected 0-20`);
     return false;
   }
 
-  if (!Array.isArray(data.items) || data.items.length !== 7) {
+  // Check items array (4 items for buildAnalysisPrompt_simple)
+  if (!Array.isArray(data.items) || data.items.length !== 4) {
+    console.error(`❌ Validation failed: items array length is ${data.items?.length || 0}, expected 4`);
     return false;
   }
 
+  // Validate each item
   for (const item of data.items) {
     if (
       !item.id ||
@@ -911,14 +958,18 @@ function validateEvaluationResult(data) {
       !item.positives ||
       !item.negatives
     ) {
+      console.error("❌ Validation failed: item missing required fields", item);
       return false;
     }
   }
 
+  // Check overallComment
   if (typeof data.overallComment !== "string") {
+    console.error("❌ Validation failed: overallComment is not a string");
     return false;
   }
 
+  console.log("✅ Evaluation result validation passed");
   return true;
 }
 
