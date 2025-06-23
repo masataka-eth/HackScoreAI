@@ -107,9 +107,15 @@ export const hackathonOperations = {
         return { success: true, data: { ...data, id: data.hackathonId } };
       } else {
         // エラーの詳細を正確に伝える
-        const errorMessage = data?.error || error?.message || "Unknown error occurred";
-        if (errorMessage.includes('Auth session missing') || errorMessage.includes('Invalid token')) {
-          throw new Error("認証セッションが無効です。一度ログアウトして再度ログインしてください。");
+        const errorMessage =
+          data?.error || error?.message || "Unknown error occurred";
+        if (
+          errorMessage.includes("Auth session missing") ||
+          errorMessage.includes("Invalid token")
+        ) {
+          throw new Error(
+            "認証セッションが無効です。一度ログアウトして再度ログインしてください。"
+          );
         }
         throw new Error(errorMessage);
       }
@@ -350,15 +356,27 @@ export const hackathonOperations = {
         throw new Error("認証が必要です。ログインしてください。");
       }
 
-      const { data, error } = await supabase.functions.invoke(
-        "add-repository",
-        {
-          body: {
-            hackathonId,
-            repositoryName,
-          },
-        }
+      console.log("📞 Calling Edge Function add-repository...");
+
+      // タイムアウト付きでEdge Functionを呼び出し
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error("Edge Function timeout (30s)")),
+          30000
+        )
       );
+
+      const edgeFunctionPromise = supabase.functions.invoke("add-repository", {
+        body: {
+          hackathonId,
+          repositoryName,
+        },
+      });
+
+      const { data, error } = (await Promise.race([
+        edgeFunctionPromise,
+        timeoutPromise,
+      ])) as any;
 
       console.log("📡 Edge Function response:", { data, error });
 
@@ -367,9 +385,10 @@ export const hackathonOperations = {
         throw error;
       }
 
+      console.log("✅ Repository added successfully");
       return { success: true, data };
     } catch (error) {
-      console.error("Error adding repository to hackathon:", error);
+      console.error("❌ Error adding repository to hackathon:", error);
       return { success: false, error };
     }
   },

@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { OctocatCharacter } from "@/components/octocat-character";
 import { BinaryBackground } from "@/components/binary-background";
+import { toast } from "sonner";
 
 interface HackathonDetails {
   id: string;
@@ -103,109 +104,116 @@ export default function HackathonDetailPage() {
     }
   }, [user, loading, router]);
 
-  useEffect(() => {
-    const loadHackathonDetails = async () => {
-      if (!params?.id || !user) return;
+  // ハッカソン詳細を読み込む関数
+  const loadHackathonDetails = async (isInitialLoad = false) => {
+    if (!params?.id || !user) return;
 
-      try {
-        const { hackathonOperations, supabase } = await import(
-          "@/lib/supabase"
+    try {
+      const { hackathonOperations, supabase } = await import("@/lib/supabase");
+
+      // ハッカソンの基本情報を取得
+      const result = await hackathonOperations.getHackathonDetails(
+        params.id as string
+      );
+
+      if (result.success && result.data) {
+        setHackathon(result.data as HackathonDetails);
+      }
+
+      // 評価サマリーを取得（順位表示用）
+      const { data: evaluationSummary, error } = await supabase
+        .from("evaluation_results")
+        .select(
+          "id, repository_name, total_score, created_at, job_id, evaluation_data"
+        )
+        .eq("hackathon_id", params.id)
+        .order("total_score", { ascending: false });
+
+      if (evaluationSummary && !error) {
+        // overall_commentを含む形式に変換
+        const formattedEvaluations = evaluationSummary.map(
+          (evaluation: any) => ({
+            id: evaluation.id,
+            repository_name: evaluation.repository_name,
+            total_score: evaluation.total_score,
+            overall_comment: evaluation.evaluation_data?.overallComment || "",
+            created_at: evaluation.created_at,
+            job_id: evaluation.job_id,
+          })
         );
 
-        // ハッカソンの基本情報を取得
-        const result = await hackathonOperations.getHackathonDetails(
-          params.id as string
-        );
+        setRepositoryEvaluations(formattedEvaluations);
 
+        // ハッカソンデータが取得できている場合、全リポジトリの状態を構築
         if (result.success && result.data) {
-          setHackathon(result.data as HackathonDetails);
-        }
+          const allRepositories = result.data.repositories;
+          const repositoryStatusList: RepositoryStatus[] = [];
 
-        // 評価サマリーを取得（順位表示用）
-        const { data: evaluationSummary, error } = await supabase
-          .from("evaluation_results")
-          .select(
-            "id, repository_name, total_score, created_at, job_id, evaluation_data"
-          )
-          .eq("hackathon_id", params.id)
-          .order("total_score", { ascending: false });
-
-        if (evaluationSummary && !error) {
-          // overall_commentを含む形式に変換
-          const formattedEvaluations = evaluationSummary.map(
-            (evaluation: any) => ({
-              id: evaluation.id,
+          // 評価完了済みリポジトリを追加
+          formattedEvaluations.forEach((evaluation: any, index: number) => {
+            repositoryStatusList.push({
               repository_name: evaluation.repository_name,
-              total_score: evaluation.total_score,
-              overall_comment: evaluation.evaluation_data?.overallComment || "",
-              created_at: evaluation.created_at,
-              job_id: evaluation.job_id,
-            })
-          );
-
-          setRepositoryEvaluations(formattedEvaluations);
-
-          // ハッカソンデータが取得できている場合、全リポジトリの状態を構築
-          if (result.success && result.data) {
-            const allRepositories = result.data.repositories;
-            const repositoryStatusList: RepositoryStatus[] = [];
-
-            // 評価完了済みリポジトリを追加
-            formattedEvaluations.forEach((evaluation: any, index: number) => {
-              repositoryStatusList.push({
-                repository_name: evaluation.repository_name,
-                status: "completed",
-                evaluation: evaluation,
-                rank: index + 1,
-              });
+              status: "completed",
+              evaluation: evaluation,
+              rank: index + 1,
             });
+          });
 
-            // 評価中または失敗したリポジトリを追加
-            allRepositories.forEach((repoName: string) => {
-              const isRepoEvaluated = formattedEvaluations.some(
-                (evaluation: any) => evaluation.repository_name === repoName
-              );
-              if (!isRepoEvaluated) {
-                // ハッカソンのステータスに基づいて判定
-                let status: "evaluating" | "failed" = "evaluating";
+          // 評価中または失敗したリポジトリを追加
+          allRepositories.forEach((repoName: string) => {
+            const isRepoEvaluated = formattedEvaluations.some(
+              (evaluation: any) => evaluation.repository_name === repoName
+            );
+            if (!isRepoEvaluated) {
+              // デフォルトは「分析中」
+              let status: "evaluating" | "failed" = "evaluating";
 
-                // 完了済みハッカソンで評価がない場合は失敗
-                if (result.data?.status === "completed") {
+              // ハッカソン全体が完了していて、かつ一定時間経過している場合のみ失敗と判定
+              // （ただし、新しく追加されたリポジトリは除外）
+              if (result.data?.status === "completed" && hackathon?.completedAt) {
+                const completedDate = new Date(hackathon.completedAt);
+                const hoursSinceCompletion = (Date.now() - completedDate.getTime()) / (1000 * 60 * 60);
+                // 完了から1時間以上経過している場合のみ失敗と判定
+                if (hoursSinceCompletion > 1) {
                   status = "failed";
                 }
-
-                repositoryStatusList.push({
-                  repository_name: repoName,
-                  status: status,
-                });
               }
-            });
 
-            setRepositoryStatuses(repositoryStatusList);
-          }
-        }
-
-        // フォールバック: ローカルストレージから読み込み
-        if (!result.success) {
-          const saved = localStorage.getItem("hackscoreai_hackathons");
-          if (saved) {
-            const hackathons = JSON.parse(saved) as HackathonDetails[];
-            const found = hackathons.find(
-              (h: HackathonDetails) => h.id === params.id
-            );
-            if (found) {
-              setHackathon(found);
+              repositoryStatusList.push({
+                repository_name: repoName,
+                status: status,
+              });
             }
+          });
+
+          setRepositoryStatuses(repositoryStatusList);
+        }
+      }
+
+      // フォールバック: ローカルストレージから読み込み
+      if (!result.success) {
+        const saved = localStorage.getItem("hackscoreai_hackathons");
+        if (saved) {
+          const hackathons = JSON.parse(saved) as HackathonDetails[];
+          const found = hackathons.find(
+            (h: HackathonDetails) => h.id === params.id
+          );
+          if (found) {
+            setHackathon(found);
           }
         }
-      } catch (error) {
-        console.error("Error loading hackathon details:", error);
-      } finally {
+      }
+    } catch (error) {
+      console.error("Error loading hackathon details:", error);
+    } finally {
+      if (isInitialLoad) {
         setIsLoading(false);
       }
-    };
+    }
+  };
 
-    loadHackathonDetails();
+  useEffect(() => {
+    loadHackathonDetails(true);
   }, [params?.id, user]);
 
   // GitHubリポジトリ一覧を取得
@@ -218,8 +226,9 @@ export default function HackathonDetailPage() {
       const result = await vaultOperations.getKey(user!.id, "github_token");
 
       if (!result.success || !result.data) {
-        alert(
-          "GitHubトークンが設定されていません。設定ページで設定してください。"
+        toast.error(
+          "GitHubトークンが設定されていません。設定ページで設定してください。",
+          { duration: 4000 }
         );
         return;
       }
@@ -250,78 +259,104 @@ export default function HackathonDetailPage() {
       setAvailableRepos(newRepos);
     } catch (error) {
       console.error("Error loading repositories:", error);
-      alert("リポジトリの取得に失敗しました");
+      toast.error("リポジトリの取得に失敗しました", { duration: 3000 });
     } finally {
       setIsLoadingRepos(false);
     }
   };
 
-  // リポジトリを追加
+  // リポジトリを追加（Edge Function呼び出し時点で即座通知版）
   const handleAddRepositories = async () => {
     if (selectedRepos.length === 0) return;
 
     setIsAddingRepositories(true);
-    let successCount = 0;
-    let failedRepos: string[] = [];
-
+    
+    // 選択したリポジトリを一時保存
+    const reposToAdd = [...selectedRepos];
+    
+    // Edge Function呼び出し開始時点で即座に成功通知＆モーダルを閉じる
+    toast.success(
+      `🎉 ${reposToAdd.length}個のリポジトリを解析キューに送信中...`,
+      { duration: 3000 }
+    );
+    
+    // 即座にモーダルを閉じて画面を戻す
+    setIsAddRepositoryOpen(false);
+    setGithubOrg("");
+    setAvailableRepos([]);
+    setSelectedRepos([]);
+    
+    // 即座にリポジトリ数を増やして表示（楽観的更新）
+    if (hackathon) {
+      // 新しいリポジトリを追加した状態を即座に反映
+      const updatedRepositories = [...hackathon.repositories, ...reposToAdd];
+      setHackathon({
+        ...hackathon,
+        repositories: updatedRepositories
+      });
+      
+      // 新しいリポジトリのステータスを「分析中」として追加
+      const newStatuses = reposToAdd.map(repo => ({
+        repository_name: repo,
+        status: "evaluating" as const,
+      }));
+      setRepositoryStatuses([...repositoryStatuses, ...newStatuses]);
+    }
+    
     try {
+      console.log(`🚀 Adding ${reposToAdd.length} repositories to queue...`);
       const { hackathonOperations } = await import("@/lib/supabase");
+      
+      let successCount = 0;
+      let failedRepos: string[] = [];
 
-      // 選択されたリポジトリを順番に追加
-      for (const repo of selectedRepos) {
-        try {
-          const result = await hackathonOperations.addRepositoryToHackathon(
-            params.id as string,
-            repo
-          );
-
-          if (result.success) {
-            successCount++;
-          } else {
-            console.error(`Failed to add repository ${repo}:`, result.error);
+      // バックグラウンドで処理を継続（結果を待たない）
+      Promise.all(
+        reposToAdd.map(async (repo) => {
+          try {
+            console.log(`📦 Adding ${repo} to analysis queue...`);
+            const result = await hackathonOperations.addRepositoryToHackathon(
+              params.id as string,
+              repo
+            );
+            
+            if (result.success) {
+              console.log(`✅ ${repo} added to queue successfully`);
+              successCount++;
+            } else {
+              console.error(`❌ Failed to add ${repo} to queue:`, result.error);
+              failedRepos.push(repo);
+            }
+          } catch (error) {
+            console.error(`❌ Error adding repository ${repo}:`, error);
             failedRepos.push(repo);
           }
-        } catch (error) {
-          console.error(`Error adding repository ${repo}:`, error);
-          failedRepos.push(repo);
-        }
-      }
-
-      // 結果のサマリーを表示
-      if (successCount > 0) {
+        })
+      ).then(() => {
+        // バックグラウンド処理完了後の追加通知（オプション）
+        console.log(`📊 Final results: ${successCount} added, ${failedRepos.length} failed`);
+        
         if (failedRepos.length > 0) {
-          alert(
-            `${successCount}個のリポジトリを追加しました。\n失敗: ${failedRepos.join(
-              ", "
-            )}`
+          toast.error(
+            `⚠️ ${failedRepos.length}個のリポジトリの追加に失敗しました`,
+            { duration: 4000 }
           );
-        } else {
-          alert(`${successCount}個のリポジトリを追加しました。`);
+        } else if (successCount === reposToAdd.length) {
+          toast.success(
+            `✅ 全てのリポジトリをキューに追加完了！`,
+            { duration: 2000 }
+          );
         }
-
-        // 成功した場合のみモーダルを閉じる
-        setIsAddRepositoryOpen(false);
-        setGithubOrg("");
-        setAvailableRepos([]);
-        setSelectedRepos([]);
-
-        // 状態をリセットしてから再読み込み
-        setIsAddingRepositories(false);
-
-        // ハッカソン詳細を再読み込み
-        setTimeout(() => {
-          window.location.reload();
-        }, 500);
-      } else {
-        // すべて失敗した場合
-        alert(
-          `リポジトリの追加に失敗しました。\n失敗: ${failedRepos.join(", ")}`
-        );
-        setIsAddingRepositories(false);
-      }
+        
+        // 完了後に再度データを更新
+        loadHackathonDetails();
+      });
+      
     } catch (error) {
-      console.error("Error adding repositories:", error);
-      alert("リポジトリの追加に失敗しました");
+      console.error("❌ Error initiating repository addition:", error);
+      // 初期化エラーの場合のみ表示（既に画面は戻っている）
+      toast.error("❌ リポジトリ追加の開始に失敗しました", { duration: 3000 });
+    } finally {
       setIsAddingRepositories(false);
     }
   };
@@ -345,13 +380,14 @@ export default function HackathonDetailPage() {
 
       if (result.success) {
         // ハッカソン詳細を再読み込み
-        window.location.reload();
+        await loadHackathonDetails();
+        toast.success("リポジトリを削除しました", { duration: 3000 });
       } else {
-        alert("リポジトリの削除に失敗しました");
+        toast.error("リポジトリの削除に失敗しました", { duration: 3000 });
       }
     } catch (error) {
       console.error("Error removing repository:", error);
-      alert("リポジトリの削除に失敗しました");
+      toast.error("リポジトリの削除に失敗しました", { duration: 3000 });
     }
   };
 
@@ -365,17 +401,15 @@ export default function HackathonDetailPage() {
       );
 
       if (result.success) {
-        alert("リポジトリの再分析を開始しました");
-        // ハッカソン詳細を再読み込み
-        setTimeout(() => {
-          window.location.reload();
-        }, 1000);
+        toast.success("リポジトリの再分析を開始しました", { duration: 3000 });
+        // キュー登録完了後、即座にデータを再読み込み（分析完了は待機しない）
+        await loadHackathonDetails();
       } else {
-        alert("再分析の開始に失敗しました");
+        toast.error("再分析の開始に失敗しました", { duration: 3000 });
       }
     } catch (error) {
       console.error("Error retrying repository:", error);
-      alert("再分析の開始に失敗しました");
+      toast.error("再分析の開始に失敗しました", { duration: 3000 });
     }
   };
 
@@ -674,7 +708,7 @@ export default function HackathonDetailPage() {
                         className="w-full sm:w-auto"
                       >
                         {isAddingRepositories
-                          ? "追加中..."
+                          ? "キューに追加中..."
                           : `${selectedRepos.length}個を追加`}
                       </Button>
                     </DialogFooter>
