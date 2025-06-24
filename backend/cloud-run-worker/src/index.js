@@ -1,10 +1,26 @@
+/**
+ * Cloud Run Worker - GitHubリポジトリ評価システム
+ * 
+ * このWorkerは、Supabaseのキュー（pgmq）からGitHubリポジトリ評価ジョブを取得し、
+ * Claude Code SDKを使用してリポジトリを解析・評価を行います。
+ * 
+ * 主な機能：
+ * - Supabase pgmqキューからジョブを取得・処理
+ * - Claude Code SDK + GitHub MCPを使用したリポジトリ解析
+ * - ハッカソン評価基準に基づくスコアリング
+ * - 評価結果のSupabaseデータベースへの保存
+ * - 認証・ログ・エラーハンドリング
+ */
+
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
 import { query } from "@anthropic-ai/claude-code";
 import "dotenv/config";
 
+// Express.jsアプリケーションの設定
+// Cloud Runで動作するHTTPサーバーとして機能
 const app = express();
-app.use(express.json());
+app.use(express.json()); // JSONリクエストボディのパース
 
 // Environment variables validation
 const requiredEnvVars = [
@@ -66,7 +82,8 @@ const authenticateRequest = (req, res, next) => {
   next();
 };
 
-// Health check (no auth required)
+// ヘルスチェックエンドポイント（認証不要）
+// Cloud Runのヘルスチェックとサービス監視に使用
 app.get("/health", (req, res) => {
   console.log(`🏥 Health check request received from ${req.ip}`);
   res.json({
@@ -82,13 +99,16 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Simple test endpoint
+// テスト用エンドポイント
+// 基本的な動作確認用
 app.get("/test", (req, res) => {
   console.log(`🧪 Test request received from ${req.ip}`);
   res.send("Hello from Cloud Run Worker!");
 });
 
-// Process single repository (HTTP trigger) - requires authentication
+// 単一リポジトリ処理エンドポイント（認証必須）
+// フロントエンドまたは内部のpollエンドポイントから呼び出される
+// Claude Code SDKを使用してGitHubリポジトリを解析・評価
 app.post("/process", authenticateRequest, async (req, res) => {
   try {
     console.log("🔍 Request body received:", JSON.stringify(req.body, null, 2));
@@ -201,7 +221,9 @@ app.post("/process", authenticateRequest, async (req, res) => {
   }
 });
 
-// Poll Supabase queue and process jobs - requires authentication
+// Supabaseキューポーリング・ジョブ処理エンドポイント（認証必須）
+// pgmqキューからジョブを連続的に取得・処理
+// Google Cloud Schedulerから定期実行される
 app.post("/poll", authenticateRequest, async (req, res) => {
   try {
     console.log("📥 Starting continuous polling for jobs...");
@@ -445,6 +467,16 @@ app.post("/poll", authenticateRequest, async (req, res) => {
   }
 });
 
+/**
+ * ユーザーのシークレット情報取得
+ * 
+ * Supabase Vaultからユーザーの認証情報を安全に取得
+ * - Anthropic API Key: Claude Code SDK用
+ * - GitHub Token: GitHub MCP用
+ * 
+ * @param {string} userId - ユーザーID
+ * @returns {Object} secrets - ユーザーの認証情報
+ */
 async function getUserSecrets(userId) {
   console.log(`🔑 Retrieving secrets for user: ${userId}`);
 
@@ -491,6 +523,22 @@ async function getUserSecrets(userId) {
   return { anthropicKey, githubToken };
 }
 
+/**
+ * Claude Code SDKを使用したリポジトリ解析・評価処理
+ * 
+ * このメソッドはHackScoreAIの中核となる評価ロジックです。
+ * Claude Code SDKとGitHub MCPを連携させて以下の流れで処理します：
+ * 
+ * 1. GitHub MCPを使用してリポジトリ構造・ファイル取得
+ * 2. Claude Code SDKでコード解析・評価プロンプト実行
+ * 3. ハッカソン評価基準に基づくスコアリング
+ * 4. JSON形式での評価結果取得・バリデーション
+ * 
+ * @param {string} repoName - GitHubリポジトリ名（owner/repo形式）
+ * @param {Object} secrets - ユーザーの認証情報
+ * @param {Object} evaluationCriteria - 評価基準（現在未使用、将来拡張予定）
+ * @returns {Object} 評価結果オブジェクト
+ */
 async function processRepositoryWithClaudeCode(
   repoName,
   secrets,
@@ -501,7 +549,8 @@ async function processRepositoryWithClaudeCode(
   try {
     console.log(`🔍 Analyzing repository: ${repoName}`);
 
-    // const prompt = buildAnalysisPrompt_simple(repoName, evaluationCriteria);
+    // Claude Code用の解析プロンプト生成
+    // simple版は4項目評価（市場優位性、技術力、完成度、ユーザビリティ）
     const prompt = buildAnalysisPrompt_simple(repoName, evaluationCriteria);
     const abortController = new AbortController();
 
@@ -523,21 +572,26 @@ async function processRepositoryWithClaudeCode(
       )}... for Claude Code`
     );
 
+    // Claude Code SDK設定
+    // GitHub MCPサーバーと連携してリポジトリアクセス可能にする
     const queryOptions = {
       prompt,
       abortController,
       options: {
-        maxTurns: config.processing.maxTurns,
-        apiKey: secrets.anthropicKey,
+        maxTurns: config.processing.maxTurns, // 最大ターン数制限
+        apiKey: secrets.anthropicKey, // Anthropic API Key
         mcpServers: {
+          // GitHub MCP設定 - GitHubリポジトリアクセス用
           github: {
             command: "npx",
             args: ["-y", "@modelcontextprotocol/server-github"],
             env: {
-              GITHUB_PERSONAL_ACCESS_TOKEN: secrets.githubToken,
+              GITHUB_PERSONAL_ACCESS_TOKEN: secrets.githubToken, // GitHub認証
             },
           },
         },
+        // 許可されたMCPツール一覧
+        // リポジトリ構造取得、ファイル内容読み取り、コード検索等
         allowedTools: [
           "mcp__github__get_file_contents",
           "mcp__github__search_repositories",
@@ -549,16 +603,20 @@ async function processRepositoryWithClaudeCode(
       },
     };
 
+    // Claude Code SDK実行・結果処理
     let evaluationResult = null;
     let numTurns = 0;
     let totalCostUsd = 0;
 
+    // Claude Code SDKのストリーミング処理
+    // GitHub MCPでリポジトリ解析 → Claude評価 → JSON結果取得
     for await (const message of query(queryOptions)) {
       numTurns++;
 
       if (message.type === "assistant") {
         console.log(`Turn ${numTurns}: Assistant response`);
 
+        // Claude Code レスポンスからテキスト抽出
         let contentText = "";
         if (typeof message.message.content === "string") {
           contentText = message.message.content;
@@ -569,13 +627,14 @@ async function processRepositoryWithClaudeCode(
             .join("");
         }
 
+        // 評価結果JSON抽出・バリデーション
         const extractedJson = extractJsonFromText(contentText);
         if (extractedJson && validateEvaluationResult(extractedJson)) {
           evaluationResult = extractedJson;
           console.log(
             "✅ Valid evaluation result JSON detected - continuing to completion"
           );
-          // breakを削除 - Claude Code SDKの正常完了を待つ
+          // Claude Code SDKの正常完了を待つ（breakしない）
         }
       } else if (message.type === "result") {
         if (message.subtype === "success") {
@@ -607,6 +666,8 @@ async function processRepositoryWithClaudeCode(
   } catch (error) {
     console.error(`❌ Error analyzing ${repoName}:`, error);
 
+    // エラーハンドリング・ログ出力
+    // Claude Code SDKプロセス終了エラーの詳細分析
     // Claude Code process exit error
     if (error.message.includes("exited with code 1")) {
       console.error("❌ Claude Code process failed. Common causes:");
@@ -1002,6 +1063,21 @@ function validateEvaluationResult(data) {
   return true;
 }
 
+/**
+ * 評価結果のSupabaseデータベース保存
+ * 
+ * save_evaluation_result RPCを呼び出して以下データを保存：
+ * - 評価スコア（totalScore、各項目スコア）
+ * - 評価コメント（positives、negatives、overallComment）
+ * - 処理メタデータ（ターン数、コスト等）
+ * 
+ * @param {string} jobId - ジョブID
+ * @param {string} userId - ユーザーID
+ * @param {string} repositoryName - リポジトリ名
+ * @param {Object} evaluationData - 評価結果データ
+ * @param {Object} metadata - 処理メタデータ
+ * @returns {Object} 保存結果
+ */
 async function saveEvaluationResult(
   jobId,
   userId,
@@ -1041,8 +1117,14 @@ async function saveEvaluationResult(
   return data;
 }
 
+/**
+ * ジョブステータスレコードの確保
+ * 
+ * job_statusテーブルにレコードが存在しない場合は作成
+ * 重複エラーは無視（既存レコードがある場合）
+ */
 async function ensureJobStatus(jobId, userId, payload) {
-  // First try to insert the job status record if it doesn't exist
+  // ジョブステータスレコードが存在しない場合は作成
   const { error: insertError } = await supabase.from("job_status").insert({
     id: jobId,
     status: "processing",
@@ -1060,6 +1142,18 @@ async function ensureJobStatus(jobId, userId, payload) {
   }
 }
 
+/**
+ * ジョブステータス更新
+ * 
+ * job_statusテーブルのステータスと結果を更新
+ * - processing: 処理中
+ * - completed: 完了
+ * - failed: 失敗
+ * 
+ * @param {string} jobId - ジョブID
+ * @param {string} status - ステータス
+ * @param {Object} result - 結果データ（任意）
+ */
 async function updateJobStatus(jobId, status, result = null) {
   console.log(
     `📝 Updating job_status table for job ${jobId} with status "${status}"`
@@ -1091,7 +1185,8 @@ async function updateJobStatus(jobId, status, result = null) {
   return data;
 }
 
-// Start server
+// Express.jsサーバー起動
+// Cloud Run環境でHTTPサーバーとして動作
 console.log(`🔍 DEBUG: About to start server on port ${config.server.port}`);
 console.log(`🔍 DEBUG: Config object:`, JSON.stringify(config, null, 2));
 

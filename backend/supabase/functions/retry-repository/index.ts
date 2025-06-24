@@ -1,3 +1,25 @@
+// Deno型定義の宣言
+declare const Deno: {
+  env: {
+    get(key: string): string | undefined;
+  };
+};
+
+/**
+ * リポジトリ再実行Edge Function
+ * 
+ * 【役割と機能】
+ * - 失敗したリポジトリ評価を再実行する
+ * - 新しいジョブをキューに投入し直す
+ * - Cloud Run Workerに処理開始を通知
+ * 
+ * 【リクエスト処理の流れ】
+ * 1. ユーザー認証の確認
+ * 2. ハッカソンIDとリポジトリ名のバリデーション
+ * 3. 権限確認と失敗ステータスの確認
+ * 4. 新規ジョブ作成とキューへの投入
+ * 5. Cloud Run Workerへの処理開始通知
+ */
 import { serve } from "https://deno.land/std@0.184.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { corsHeaders } from "../_shared/cors.ts";
@@ -85,10 +107,11 @@ serve(async (req: Request) => {
 
     console.log(`✅ Repository retry initiated successfully`);
 
-    // Trigger Cloud Run worker ping
+    // 【外部サービス連携】Cloud Run Workerに再実行ジョブの処理開始を通知
     const cloudRunUrl = Deno.env.get("CLOUD_RUN_WORKER_URL");
     if (cloudRunUrl) {
       try {
+        // Cloud Run Workerの/pollエンドポイントに再実行シグナルを送信
         const pingResponse = await fetch(`${cloudRunUrl}/poll`, {
           method: "POST",
           headers: {
@@ -104,10 +127,11 @@ serve(async (req: Request) => {
         }
       } catch (pingError) {
         console.error("Failed to ping worker:", pingError);
-        // Don't fail the request if ping fails
+        // Worker通知の失敗はリクエスト全体の失敗にはしない
       }
     }
 
+    // 【レスポンス形式】成功時のレスポンスを返す
     return new Response(
       JSON.stringify({
         success: true,
@@ -121,6 +145,7 @@ serve(async (req: Request) => {
       }
     );
   } catch (error) {
+    // 【エラーハンドリング】予期しないエラーの処理
     console.error("Unexpected error:", error);
     return new Response(
       JSON.stringify({

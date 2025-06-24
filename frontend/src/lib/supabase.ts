@@ -1,19 +1,32 @@
+// Supabaseクライアントライブラリをインポート
 import { createClient } from "@supabase/supabase-js";
 
+// 環境変数からSupabaseの接続情報を取得
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
+// Supabaseクライアントインスタンスを作成・エクスポート
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// Vault操作用の関数
+/**
+ * Vault操作用の関数群
+ * ユーザーの機密情報（APIキー等）をSupabase Vaultで暗号化して安全に保存・取得
+ */
 export const vaultOperations = {
-  // キーを保存
+  /**
+   * APIキーをVaultに保存
+   * @param userId ユーザーID
+   * @param keyType キーの種類（Anthropic API キーまたはGitHub Token）
+   * @param keyValue 保存するキーの値
+   * @returns 保存結果
+   */
   async storeKey(
     userId: string,
     keyType: "anthropic_key" | "github_token",
     keyValue: string
   ) {
     try {
+      // Supabase RPC関数を呼び出してキーを暗号化保存
       const { data, error } = await supabase.rpc("store_user_secret", {
         p_user_id: userId,
         p_secret_type: keyType,
@@ -29,9 +42,15 @@ export const vaultOperations = {
     }
   },
 
-  // キーを取得
+  /**
+   * Vaultからキーを取得
+   * @param userId ユーザーID
+   * @param keyType キーの種類（Anthropic API キーまたはGitHub Token）
+   * @returns 取得結果
+   */
   async getKey(userId: string, keyType: "anthropic_key" | "github_token") {
     try {
+      // Supabase RPC関数を呼び出してキーを復号化取得
       const { data, error } = await supabase.rpc("get_user_secret", {
         p_user_id: userId,
         p_secret_type: keyType,
@@ -46,7 +65,12 @@ export const vaultOperations = {
     }
   },
 
-  // キーを削除（削除機能は未実装、必要に応じて追加）
+  /**
+   * Vaultからキーを削除
+   * @param userId ユーザーID
+   * @param keyType キーの種類（Anthropic API キーまたはGitHub Token）
+   * @returns 削除結果
+   */
   async deleteKey(userId: string, keyType: "anthropic_key" | "github_token") {
     try {
       // user_secretsテーブルから直接削除
@@ -66,16 +90,23 @@ export const vaultOperations = {
   },
 };
 
-// ハッカソン操作用の関数
+/**
+ * ハッカソン操作用の関数群
+ * ハッカソンの作成、取得、削除等の管理機能を提供
+ */
 export const hackathonOperations = {
-  // ハッカソンを登録（Edge Functionのenqueueエンドポイントを使用）
+  /**
+   * 新しいハッカソンを作成して評価キューに投入
+   * @param hackathonData ハッカソン情報（名前、リポジトリリスト、ユーザーID）
+   * @returns 作成結果
+   */
   async createHackathon(hackathonData: {
     name: string;
     repositories: string[];
     userId: string;
   }) {
     try {
-      // 認証状態を確認
+      // 認証状態を確認（セッションが有効かチェック）
       const {
         data: { session },
         error: authError,
@@ -88,6 +119,7 @@ export const hackathonOperations = {
 
       console.log("🔐 Auth session exists:", !!session);
 
+      // Supabase Edge Function「enqueue」を呼び出してハッカソン作成とジョブキューへの投入を実行
       const { data, error } = await supabase.functions.invoke("enqueue", {
         body: {
           repositories: hackathonData.repositories,
@@ -125,7 +157,12 @@ export const hackathonOperations = {
     }
   },
 
-  // ハッカソン一覧を取得
+  /**
+   * ハッカソン一覧を取得
+   * 指定されたユーザーが作成したハッカソンの一覧を取得し、基本情報をフロントエンド表示用にフォーマットして返す
+   * @param userId - 取得対象のユーザーID
+   * @returns ハッカソン一覧（ID、名前、ステータス、スコア、作成日等）
+   */
   async getHackathons(userId: string) {
     try {
       // hackathonsテーブルから直接取得
@@ -159,7 +196,12 @@ export const hackathonOperations = {
     }
   },
 
-  // ハッカソン詳細を取得
+  /**
+   * ハッカソン詳細を取得
+   * 指定されたハッカソンの詳細情報（リポジトリリスト、評価結果、実行状況等）を取得
+   * @param hackathonId - 取得対象のハッカソンID
+   * @returns ハッカソン詳細情報（基本情報、リポジトリ状況、評価結果等）
+   */
   async getHackathonDetails(hackathonId: string) {
     try {
       // ハッカソンの基本情報を取得
@@ -330,7 +372,11 @@ export const hackathonOperations = {
     }
   },
 
-  // 手動でワーカー処理をトリガー
+  /**
+   * ワーカー処理手動実行
+   * キューに蓄積されたジョブを手動で処理するためにrepo_worker Edge Functionを呼び出す
+   * @returns 処理実行結果
+   */
   async triggerWorkerProcessing() {
     try {
       const { data, error } = await supabase.functions.invoke("repo_worker", {
@@ -345,7 +391,12 @@ export const hackathonOperations = {
     }
   },
 
-  // 評価詳細を取得
+  /**
+   * 評価詳細取得
+   * 指定された評価IDの詳細情報（スコア、評価項目、コメント等）をRPC関数経由で取得
+   * @param evaluationId - 取得対象の評価ID
+   * @returns 評価詳細情報（項目別スコア、ポジティブ・ネガティブ要素等）
+   */
   async getEvaluationDetails(evaluationId: string) {
     try {
       const { data, error } = await supabase.rpc("get_evaluation_details", {
@@ -360,7 +411,12 @@ export const hackathonOperations = {
     }
   },
 
-  // 評価サマリーを取得
+  /**
+   * 評価サマリー取得
+   * 指定されたユーザーの全評価結果の統計情報をRPC関数経由で取得
+   * @param userId - 取得対象のユーザーID
+   * @returns 評価サマリー（総合スコア、評価数、平均値等の統計情報）
+   */
   async getEvaluationSummary(userId: string) {
     try {
       const { data, error } = await supabase.rpc("get_evaluation_summary", {
@@ -375,7 +431,13 @@ export const hackathonOperations = {
     }
   },
 
-  // ハッカソンにリポジトリを追加
+  /**
+   * リポジトリ追加
+   * 既存のハッカソンに新しいリポジトリを追加し、評価キューに投入する
+   * @param hackathonId - 追加先のハッカソンID
+   * @param repositoryName - 追加するリポジトリ名（例: "owner/repo"）
+   * @returns 追加処理結果
+   */
   async addRepositoryToHackathon(hackathonId: string, repositoryName: string) {
     try {
       console.log("🔄 Adding repository to hackathon:", {
@@ -432,7 +494,13 @@ export const hackathonOperations = {
     }
   },
 
-  // ハッカソンからリポジトリを削除
+  /**
+   * リポジトリ削除
+   * ハッカソンから指定されたリポジトリとその評価結果を削除する
+   * @param hackathonId - 削除元のハッカソンID
+   * @param repositoryName - 削除するリポジトリ名（例: "owner/repo"）
+   * @returns 削除処理結果
+   */
   async removeRepositoryFromHackathon(
     hackathonId: string,
     repositoryName: string
@@ -479,7 +547,12 @@ export const hackathonOperations = {
     }
   },
 
-  // ハッカソンを削除
+  /**
+   * ハッカソン削除
+   * 指定されたハッカソンとその関連データ（評価結果、ジョブ等）を完全に削除する
+   * @param hackathonId - 削除対象のハッカソンID
+   * @returns 削除処理結果
+   */
   async deleteHackathon(hackathonId: string) {
     try {
       console.log("🗑️ Deleting hackathon:", { hackathonId });
@@ -519,7 +592,13 @@ export const hackathonOperations = {
     }
   },
 
-  // 失敗したリポジトリを再実行
+  /**
+   * 失敗リポジトリ再実行
+   * 評価に失敗したリポジトリを再度評価キューに投入して処理を再実行する
+   * @param hackathonId - 対象のハッカソンID
+   * @param repositoryName - 再実行するリポジトリ名（例: "owner/repo"）
+   * @returns 再実行処理結果
+   */
   async retryFailedRepository(hackathonId: string, repositoryName: string) {
     try {
       console.log("🔄 Retrying failed repository:", {
@@ -563,7 +642,12 @@ export const hackathonOperations = {
     }
   },
 
-  // 全APIコストの合計を取得
+  /**
+   * APIコスト合計取得
+   * 指定されたユーザーの全評価処理で消費されたAPIコスト（USD）の合計金額を計算
+   * @param userId - 取得対象のユーザーID
+   * @returns 総APIコスト（USD建て）
+   */
   async getTotalApiCost(userId: string) {
     try {
       // evaluation_resultsテーブルから該当ユーザーの全てのコストを取得

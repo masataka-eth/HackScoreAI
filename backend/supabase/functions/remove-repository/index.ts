@@ -1,20 +1,41 @@
+// Deno型定義の宣言
+declare const Deno: {
+  env: {
+    get(key: string): string | undefined;
+  };
+};
+
+/**
+ * リポジトリ削除Edge Function
+ * 
+ * 【役割と機能】
+ * - ハッカソンから特定のリポジトリを削除する
+ * - 関連する評価結果とジョブを削除
+ * - 権限確認による安全な削除処理
+ * 
+ * 【リクエスト処理の流れ】
+ * 1. ユーザー認証の確認
+ * 2. ハッカソンIDとリポジトリ名のバリデーション
+ * 3. 権限確認（ハッカソン作成者のみ削除可能）
+ * 4. データベース関数による削除処理
+ */
 import { serve } from "https://deno.land/std@0.184.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { corsHeaders } from "../_shared/cors.ts";
 
 serve(async (req: Request) => {
-  // Handle CORS
+  // 【CORS処理】プリフライトリクエストの対応
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    // Create Supabase client
+    // 【データベース初期化】サービスロールでSupabaseクライアントを作成
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get auth header
+    // 【認証・権限チェック】リクエストヘッダーからJWTトークンを取得
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(
@@ -26,13 +47,14 @@ serve(async (req: Request) => {
       );
     }
 
-    // Verify user from JWT
+    // 【ユーザー認証】JWTトークンからユーザー情報を検証
     const token = authHeader.replace("Bearer ", "");
     const {
       data: { user },
       error: authError,
     } = await supabase.auth.getUser(token);
 
+    // 認証失敗時は401エラーを返す
     if (authError || !user) {
       return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401,
@@ -40,9 +62,10 @@ serve(async (req: Request) => {
       });
     }
 
-    // Parse request body
+    // 【リクエストボディの解析】ハッカソンIDと削除対象リポジトリ名を取得
     const { hackathonId, repositoryName } = await req.json();
 
+    // 必須パラメータのバリデーション
     if (!hackathonId || !repositoryName) {
       return new Response(
         JSON.stringify({
@@ -59,7 +82,8 @@ serve(async (req: Request) => {
       `🗑️ Removing repository ${repositoryName} from hackathon ${hackathonId} for user ${user.id}`
     );
 
-    // Remove repository using database function
+    // 【データベース操作】ハッカソンからリポジトリと関連データを削除
+    // データベース関数で権限確認、評価結果、ジョブを含む削除処理
     const { data, error: removeError } = await supabase.rpc(
       "remove_repository_from_hackathon",
       {
@@ -69,6 +93,7 @@ serve(async (req: Request) => {
       }
     );
 
+    // 【エラーハンドリング】リポジトリ削除失敗時の処理
     if (removeError) {
       console.error("Failed to remove repository:", removeError);
       return new Response(
@@ -85,6 +110,7 @@ serve(async (req: Request) => {
 
     console.log(`✅ Repository removed successfully`);
 
+    // 【レスポンス形式】成功時のレスポンスを返す
     return new Response(
       JSON.stringify({
         success: true,
@@ -98,6 +124,7 @@ serve(async (req: Request) => {
       }
     );
   } catch (error) {
+    // 【エラーハンドリング】予期しないエラーの処理
     console.error("Unexpected error:", error);
     return new Response(
       JSON.stringify({
