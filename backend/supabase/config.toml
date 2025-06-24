@@ -1,33 +1,71 @@
-# For detailed configuration reference documentation, visit:
+# =============================================================================
+# HackScoreAI - Supabase ローカル開発環境設定ファイル
+# =============================================================================
+#
+# 【役割と目的】
+# - Supabase CLI によるローカル開発環境の構成管理
+# - 本番環境と同等の機能をローカルで再現（PostgreSQL + Edge Functions + Auth など）
+# - HackScoreAI の GitHub 解析・評価システムに必要な全サービスの設定
+# 
+# 【設定の適用範囲】
+# - ローカル開発: `supabase start` で起動する全サービス
+# - テスト環境: CI/CD での自動テスト実行
+# - 本番環境: 一部設定（schema、migration など）が deploy 時に適用
+#
+# 【公式ドキュメント】
 # https://supabase.com/docs/guides/local-development/cli/config
-# A string used to distinguish different Supabase projects on the same host. Defaults to the
-# working directory name when running `supabase init`.
+# =============================================================================
+
+# プロジェクト識別子（同一ホスト上での複数プロジェクト区別用）
+# `supabase init` 実行時のディレクトリ名がデフォルト値
 project_id = "backend"
 
+# =============================================================================
+# API サーバー設定（PostgREST）
+# =============================================================================
+# REST API 経由でのデータベースアクセスを提供
+# HackScoreAI では主に管理画面やメタデータ取得に使用
 [api]
 enabled = true
-# Port to use for the API URL.
+
+# API サーバーのポート番号
+# フロントエンド（localhost:3000）からアクセスする際の接続先
 port = 54321
-# Schemas to expose in your API. Tables, views and stored procedures in this schema will get API
-# endpoints. `public` and `graphql_public` schemas are included by default.
+
+# API として公開するデータベーススキーマ
+# - public: メインのアプリケーションテーブル
+# - graphql_public: GraphQL エンドポイント用
+# - pgmq: PostgreSQL Message Queue（ジョブキュー機能）
 schemas = ["public", "graphql_public", "pgmq"]
-# Extra schemas to add to the search_path of every request.
+
+# 全リクエストで検索対象とするスキーマパス
+# 関数やビューの名前解決で使用される優先順位
 extra_search_path = ["public", "extensions"]
-# The maximum number of rows returns from a view, table, or stored procedure. Limits payload size
-# for accidental or malicious requests.
+
+# 1回のリクエストで返す最大行数
+# 意図しない大量データ取得やメモリ不足を防ぐセーフティネット
 max_rows = 1000
 
 [api.tls]
 # Enable HTTPS endpoints locally using a self-signed certificate.
 enabled = false
 
+# =============================================================================
+# PostgreSQL データベース設定
+# =============================================================================
+# HackScoreAI のメインデータストア
+# リポジトリ情報、評価結果、ユーザー設定などを保存
 [db]
-# Port to use for the local database URL.
+# PostgreSQL サーバーのポート番号
+# 直接 SQL 接続やマイグレーション実行時に使用
 port = 54322
-# Port used by db diff command to initialize the shadow database.
+
+# スキーマ差分検出用のシャドウデータベースポート
+# `supabase db diff` コマンドで使用
 shadow_port = 54320
-# The database major version to use. This has to be the same as your remote database's. Run `SHOW
-# server_version;` on the remote database to check.
+
+# PostgreSQL のメジャーバージョン
+# 本番環境と必ず一致させる必要がある（本番: `SHOW server_version;` で確認）
 major_version = 17
 
 [db.pooler]
@@ -42,6 +80,8 @@ default_pool_size = 20
 # Maximum number of client connections allowed.
 max_client_conn = 100
 
+# データベース内暗号化機能（Supabase Vault）
+# Claude API キーや GitHub トークンなどの機密情報を暗号化保存
 [db.vault]
 secret_key = "env(VAULT_SECRET_KEY)"
 
@@ -49,11 +89,15 @@ secret_key = "env(VAULT_SECRET_KEY)"
 # Supports glob patterns relative to supabase directory: "./schemas/*.sql"
 # schema_paths = []
 
+# データベース初期データ投入設定
+# 開発・テスト用のサンプルデータを自動投入
 [db.seed]
-# If enabled, seeds the database after migrations during a db reset.
+# db reset 時の初期データ投入を有効化
+# 開発効率向上のため推奨設定
 enabled = true
-# Specifies an ordered list of seed files to load during db reset.
-# Supports glob patterns relative to supabase directory: "./seeds/*.sql"
+
+# 初期データファイルのパス指定
+# HackScoreAI では評価基準のマスターデータなどを投入
 sql_paths = ["./seed.sql"]
 
 [realtime]
@@ -100,30 +144,52 @@ file_size_limit = "50MiB"
 # allowed_mime_types = ["image/png", "image/jpeg"]
 # objects_path = "./images"
 
+# =============================================================================
+# 認証システム設定（Supabase Auth）
+# =============================================================================
+# HackScoreAI のユーザー認証・セッション管理
+# GitHub OAuth による SSO ログインを主要機能として使用
 [auth]
 enabled = true
-# The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
-# in emails.
+
+# フロントエンドのベース URL
+# リダイレクト許可リストとメール内 URL 生成に使用
 site_url = "http://localhost:3000"
-# A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
+
+# 認証後リダイレクト許可 URL の厳密指定
+# セキュリティ上、完全一致のみ許可（ワイルドカード不可）
 additional_redirect_urls = ["http://localhost:3000", "http://localhost:3000/auth/callback"]
-# How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
+
+# JWT トークンの有効期限（秒）
+# 1時間（3600秒）〜 1週間（604800秒）の範囲で設定可能
 jwt_expiry = 3600
-# If disabled, the refresh token will never expire.
+
+# リフレッシュトークンのローテーション機能
+# セキュリティ向上のため有効化推奨
 enable_refresh_token_rotation = true
-# Allows refresh tokens to be reused after expiry, up to the specified interval in seconds.
-# Requires enable_refresh_token_rotation = true.
+
+# リフレッシュトークンの期限切れ後再利用可能時間（秒）
+# トークンローテーション有効時のみ機能
 refresh_token_reuse_interval = 10
-# Allow/disallow new user signups to your project.
+
+# 新規ユーザー登録の許可
+# HackScoreAI では GitHub OAuth のみなので実質未使用
 enable_signup = true
-# Allow/disallow anonymous sign-ins to your project.
+
+# 匿名ログインの許可（無効）
+# セキュリティとトレーサビリティのため無効化
 enable_anonymous_sign_ins = false
-# Allow/disallow testing manual linking of accounts
+
+# アカウント手動リンクのテスト許可（無効）
+# 本番環境では不要な機能
 enable_manual_linking = false
-# Passwords shorter than this value will be rejected as weak. Minimum 6, recommended 8 or more.
+
+# パスワード最小長（6文字）
+# GitHub OAuth メインのため最小設定
 minimum_password_length = 6
-# Passwords that do not meet the following requirements will be rejected as weak. Supported values
-# are: `letters_digits`, `lower_upper_letters_digits`, `lower_upper_letters_digits_symbols`
+
+# パスワード強度要件（未設定）
+# GitHub OAuth メインのため要件なし
 password_requirements = ""
 
 [auth.rate_limit]
@@ -253,11 +319,26 @@ url = ""
 # If enabled, the nonce check will be skipped. Required for local sign in with Google auth.
 skip_nonce_check = false
 
+# GitHub OAuth 設定
+# HackScoreAI のメイン認証方式
+# GitHub アカウントでのシングルサインオン（SSO）を提供
 [auth.external.github]
 enabled = true
+
+# GitHub OAuth App のクライアント ID
+# GitHub Developer Settings で取得した値を環境変数で設定
 client_id = "env(GITHUB_CLIENT_ID)"
+
+# GitHub OAuth App のクライアントシークレット
+# セキュリティ上、環境変数での管理必須
 secret = "env(GITHUB_CLIENT_SECRET)"
+
+# カスタムリダイレクト URI（未使用）
+# デフォルト設定で site_url + additional_redirect_urls を使用
 redirect_uri = ""
+
+# カスタム GitHub URL（未使用）
+# GitHub Enterprise Server 利用時のみ設定
 url = ""
 
 # Allow Solana wallet holders to sign in to your project via the Sign in with Solana (SIWS, EIP-4361) standard.
@@ -288,18 +369,34 @@ enabled = false
 # Obtain from https://clerk.com/setup/supabase
 # domain = "example.clerk.accounts.dev"
 
+# =============================================================================
+# Edge Functions ランタイム設定（Deno）
+# =============================================================================
+# HackScoreAI のバックエンド API（Hono）実行環境
+# Claude Code による GitHub リポジトリ解析処理を実行
 [edge_runtime]
 enabled = true
-# Configure one of the supported request policies: `oneshot`, `per_worker`.
-# Use `oneshot` for hot reload, or `per_worker` for load testing.
+
+# リクエスト処理ポリシー
+# - oneshot: ホットリロード対応（開発用）
+# - per_worker: ワーカープロセス分離（負荷テスト用）
 policy = "oneshot"
-# Port to attach the Chrome inspector for debugging edge functions.
+
+# Chrome DevTools デバッガー用ポート
+# Edge Functions のデバッグ・プロファイリングに使用
 inspector_port = 8083
-# The Deno major version to use.
+
+# Deno ランタイムのメジャーバージョン
+# Supabase 本番環境と一致させる必要がある
 deno_version = 1
 
+# Edge Functions で使用する環境変数・シークレット
+# HackScoreAI では外部ワーカーとの連携に使用
 [edge_runtime.secrets]
+# Cloud Run ワーカーの URL（将来的な拡張用）
 CLOUD_RUN_WORKER_URL = "env(CLOUD_RUN_WORKER_URL)"
+
+# Cloud Run ワーカー認証トークン（将来的な拡張用）
 CLOUD_RUN_AUTH_TOKEN = "env(CLOUD_RUN_AUTH_TOKEN)"
 
 [analytics]

@@ -281,8 +281,10 @@ export default function NewHackathonPage() {
         { duration: 4000 }
       );
 
-      // 即座にダッシュボードに遷移
-      router.push("/dashboard");
+      // 少し遅延を入れてからダッシュボードに遷移（DBへの書き込みを待つ）
+      setTimeout(() => {
+        router.push("/dashboard");
+      }, 500);
 
       // バックグラウンドでハッカソン登録処理を実行
       const { hackathonOperations } = await import("@/lib/supabase");

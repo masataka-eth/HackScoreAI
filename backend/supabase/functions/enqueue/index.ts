@@ -1,3 +1,25 @@
+// Deno型定義の宣言
+declare const Deno: {
+  env: {
+    get(key: string): string | undefined;
+  };
+};
+
+/**
+ * ジョブキューへの投入Edge Function
+ * 
+ * 【役割と機能】
+ * - ハッカソン評価のための新規ジョブをキューに投入する
+ * - リポジトリリストと評価基準を受け取り、ハッカソンを作成
+ * - Cloud Run Workerにジョブ処理開始の通知を送信
+ * 
+ * 【リクエスト処理の流れ】
+ * 1. CORSプリフライトリクエストの処理
+ * 2. 認証トークンの検証
+ * 3. リクエストボディの解析・バリデーション
+ * 4. ハッカソンの作成とリポジトリの登録
+ * 5. Cloud Run Workerへの処理開始通知
+ */
 import { serve } from "https://deno.land/std@0.184.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { corsHeaders } from "../_shared/cors.ts";
@@ -9,17 +31,18 @@ serve(async (req: Request) => {
     headers: Object.fromEntries(req.headers.entries()),
   });
 
-  // Handle CORS
+  // 【CORS処理】プリフライトリクエストの対応
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    // Create Supabase client with service role
+    // 【データベース初期化】管理者権限でSupabaseクライアントを作成
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     console.log("🔧 Supabase URL:", supabaseUrl);
 
+    // サービスロールキーを使用して全権限でデータベースにアクセス
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
       auth: {
         autoRefreshToken: false,
@@ -27,10 +50,11 @@ serve(async (req: Request) => {
       },
     });
 
-    // Get auth header
+    // 【認証・権限チェック】リクエストヘッダーからJWTトークンを取得
     const authHeader = req.headers.get("Authorization");
     console.log("🔐 Auth header:", authHeader?.substring(0, 50) + "...");
 
+    // 認証ヘッダーが存在しない場合は401エラーを返す
     if (!authHeader) {
       return new Response(
         JSON.stringify({ error: "Missing authorization header" }),
@@ -41,9 +65,10 @@ serve(async (req: Request) => {
       );
     }
 
-    // Parse request body first
+    // 【リクエストボディの解析】評価対象リポジトリと評価基準を取得
     const { repositories, evaluationCriteria, userId } = await req.json();
 
+    // リポジトリリストの必須チェック - 配列形式で1つ以上必要
     if (
       !repositories ||
       !Array.isArray(repositories) ||
@@ -58,10 +83,10 @@ serve(async (req: Request) => {
       );
     }
 
-    // Extract token
+    // 【ユーザー認証】JWTトークンからユーザー情報を検証
     const token = authHeader.replace("Bearer ", "");
 
-    // Create a client with the user's token for authentication
+    // ユーザートークンを使用したSupabaseクライアントで認証状態を確認
     const supabaseAuth = createClient(supabaseUrl, supabaseServiceKey, {
       global: {
         headers: {
@@ -74,7 +99,7 @@ serve(async (req: Request) => {
       },
     });
 
-    // Verify user
+    // JWTトークンの有効性とユーザー情報を取得
     const {
       data: { user },
       error: authError,
@@ -85,9 +110,10 @@ serve(async (req: Request) => {
       error: authError,
     });
 
+    // 認証失敗時の処理 - フォールバック対応あり
     if (authError || !user) {
       console.error("❌ Auth failed:", authError);
-      // Fallback to userId from body if provided
+      // リクエストボディにuserIdが含まれている場合はフォールバックとして使用
       if (userId) {
         console.log("⚠️ Using userId from request body as fallback:", userId);
       } else {
@@ -115,7 +141,8 @@ serve(async (req: Request) => {
       `📝 Creating hackathon "${hackathonName}" for user ${actualUserId} with ${repositories.length} repositories`
     );
 
-    // Create hackathon using database function with admin client
+    // 【データベース操作】ハッカソンとリポジトリジョブを一括作成
+    // データベース関数を使用してハッカソン作成とキューへのジョブ投入を実行
     const { data: hackathonId, error: createError } = await supabaseAdmin.rpc(
       "create_hackathon",
       {
@@ -128,6 +155,7 @@ serve(async (req: Request) => {
       }
     );
 
+    // 【エラーハンドリング】ハッカソン作成失敗時の処理
     if (createError) {
       console.error("Failed to create hackathon:", createError);
       return new Response(
@@ -144,10 +172,11 @@ serve(async (req: Request) => {
 
     console.log(`✅ Hackathon created with ID: ${hackathonId}`);
 
-    // Trigger Cloud Run worker ping
+    // 【外部サービス連携】Cloud Run Workerにジョブ処理開始を通知
     const cloudRunUrl = Deno.env.get("CLOUD_RUN_WORKER_URL");
     if (cloudRunUrl) {
       try {
+        // Cloud Run Workerの/pollエンドポイントに処理開始シグナルを送信
         const pingResponse = await fetch(`${cloudRunUrl}/poll`, {
           method: "POST",
           headers: {
@@ -163,10 +192,12 @@ serve(async (req: Request) => {
         }
       } catch (pingError) {
         console.error("Failed to ping worker:", pingError);
-        // Don't fail the request if ping fails
+        // Worker通知の失敗はリクエスト全体の失敗にはしない
       }
     }
 
+    // 【レスポンス形式】成功時のレスポンスを返す
+    // ハッカソンID、処理対象リポジトリ数、リポジトリリストを含む
     return new Response(
       JSON.stringify({
         success: true,
@@ -180,6 +211,7 @@ serve(async (req: Request) => {
       }
     );
   } catch (error) {
+    // 【エラーハンドリング】予期しないエラーの処理
     console.error("Unexpected error:", error);
     return new Response(
       JSON.stringify({

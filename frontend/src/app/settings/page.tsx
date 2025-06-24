@@ -1,5 +1,26 @@
 "use client";
 
+/**
+ * 設定ページ
+ * 
+ * 機能:
+ * - Anthropic API キーの設定（必須）
+ * - GitHub Personal Access Tokenの設定（オプション）
+ * - Supabase Vaultへの安全なキー保存
+ * - 保存済みキーの読み込みと表示
+ * 
+ * セキュリティ:
+ * - APIキーは暗号化してSupabase Vaultに保存
+ * - ローカルストレージにはマーカーのみ保存
+ * - パスワードフィールドで機密情報を隠蔽
+ * 
+ * 処理フロー:
+ * 1. 現在のキー設定状態を取得・表示
+ * 2. ユーザーがキーを入力
+ * 3. Supabase Vaultに安全に保存
+ * 4. ローカルストレージにマーカーを保存
+ */
+
 import { useAuth } from "@/app/providers";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -14,29 +35,42 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ArrowLeft, Key, Github, Save, Eye, EyeOff } from "lucide-react";
-import { OctocatCharacter } from "@/components/octocat-character";
 import { BinaryBackground } from "@/components/binary-background";
+import { CommonHeader } from "@/components/common-header";
 
 export default function SettingsPage() {
+  // 認証情報とページナビゲーション
   const { user, loading } = useAuth();
   const router = useRouter();
-  const [showAnthropicKey, setShowAnthropicKey] = useState(false);
-  const [showGitHubToken, setShowGitHubToken] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  
+  // パスワードフィールドの表示・非表示状態
+  const [showAnthropicKey, setShowAnthropicKey] = useState(false);    // Anthropic API Keyの表示状態
+  const [showGitHubToken, setShowGitHubToken] = useState(false);     // GitHub Tokenの表示状態
+  
+  // 保存処理状態
+  const [isSaving, setIsSaving] = useState(false);                   // 保存中フラグ
 
+  // フォーム入力データ
   const [formData, setFormData] = useState({
-    anthropicKey: "",
-    githubToken: "",
+    anthropicKey: "",     // Anthropic API Key（必須）
+    githubToken: "",      // GitHub Personal Access Token（オプション）
   });
 
+  // 認証状態チェック - ログインしていない場合はログインページへリダイレクト
   useEffect(() => {
-    if (loading) return;
+    if (loading) return; // 認証状態確認中は待機
 
     if (!user) {
       router.push("/login");
     }
   }, [user, loading, router]);
 
+  /**
+   * APIキー保存処理
+   * - Supabase Vaultへの安全なキー保存
+   * - ローカルストレージにマーカー保存
+   * - エラーハンドリングとユーザーフィードバック
+   */
   const handleSave = async () => {
     setIsSaving(true);
 
@@ -52,9 +86,10 @@ export default function SettingsPage() {
         );
       }
 
-      // Supabase Vault にキーを保存
+      // Supabase Vault 操作モジュールを動的インポート
       const { vaultOperations } = await import("@/lib/supabase");
 
+      // Anthropic API Keyの保存（入力されている場合のみ）
       if (formData.anthropicKey) {
         console.log("🔑 Storing Anthropic key for user:", userId);
         const result = await vaultOperations.storeKey(
@@ -73,6 +108,7 @@ export default function SettingsPage() {
         }
       }
 
+      // GitHub Personal Access Tokenの保存（入力されている場合のみ）
       if (formData.githubToken) {
         console.log("🔑 Storing GitHub token for user:", userId);
         const result = await vaultOperations.storeKey(
@@ -91,12 +127,12 @@ export default function SettingsPage() {
         }
       }
 
-      // ローカルには暗号化されたマーカーのみ保存
+      // ローカルストレージにはマーカーのみ保存（セキュリティ対策）
       localStorage.setItem(
         "hackscoreai_keys_saved",
         JSON.stringify({
-          anthropicKey: formData.anthropicKey ? "***" : "",
-          githubToken: formData.githubToken ? "***" : "",
+          anthropicKey: formData.anthropicKey ? "***" : "",  // 実際のキーではなくマーカー
+          githubToken: formData.githubToken ? "***" : "",    // 実際のトークンではなくマーカー
           savedAt: new Date().toISOString(),
         })
       );
@@ -106,7 +142,7 @@ export default function SettingsPage() {
     } catch (error) {
       console.error("❌ Error saving keys:", error);
 
-      // エラーの詳細情報をアラートに表示
+      // エラーメッセージの詳細抽出とユーザー向け表示
       let errorMessage =
         error instanceof Error ? error.message : "不明なエラー";
       if (error && typeof error === "object" && "code" in error) {
@@ -122,8 +158,13 @@ export default function SettingsPage() {
     }
   };
 
+  /**
+   * 保存済みキーの読み込み処理
+   * - Supabase Vaultからキーの存在確認
+   * - 存在する場合はマーカーで表示
+   * - エラー時はローカルストレージからフォールバック
+   */
   useEffect(() => {
-    // 保存済みの設定を読み込み
     const loadSavedKeys = async () => {
       if (!user) return;
 
@@ -133,7 +174,7 @@ export default function SettingsPage() {
       try {
         const { vaultOperations } = await import("@/lib/supabase");
 
-        // Anthropic Key を取得
+        // 各キーの存在確認（実際の値は取得しない）
         const anthropicResult = await vaultOperations.getKey(
           userId,
           "anthropic_key"
@@ -143,6 +184,7 @@ export default function SettingsPage() {
           "github_token"
         );
 
+        // キーが存在する場合はマーカーで表示
         setFormData({
           anthropicKey:
             anthropicResult.success && anthropicResult.data ? "***" : "",
@@ -165,6 +207,7 @@ export default function SettingsPage() {
     loadSavedKeys();
   }, [user]);
 
+  // 認証状態確認中のローディング表示
   if (loading) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
@@ -173,6 +216,7 @@ export default function SettingsPage() {
     );
   }
 
+  // 未認証の場合は何も表示しない（リダイレクト処理中）
   if (!user) {
     return null;
   }
@@ -180,25 +224,24 @@ export default function SettingsPage() {
   return (
     <div className="min-h-screen bg-background relative">
       <BinaryBackground />
-      {/* ヘッダー */}
-      <header className="border-b border-border bg-card relative z-10">
+      {/* 共通ヘッダー */}
+      <CommonHeader />
+
+      {/* ページタイトルとナビゲーション */}
+      <div className="border-b border-border bg-card relative z-10">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center gap-4">
             <Button variant="outline" size="sm" onClick={() => router.back()}>
               <ArrowLeft className="w-4 h-4" />
             </Button>
-            <div className="flex items-center gap-4">
-              <div className="w-10 h-10">
-                <OctocatCharacter size="48" />
-              </div>
-              <h1 className="text-2xl font-bold text-foreground">設定</h1>
-            </div>
+            <h1 className="text-2xl font-bold text-foreground">設定</h1>
           </div>
         </div>
-      </header>
+      </div>
 
       <main className="container mx-auto px-4 py-8 max-w-2xl relative z-10">
         <div className="space-y-6">
+          {/* ページの説明文 */}
           <div className="text-center mb-8">
             <p className="text-muted-foreground">
               ハッカソンの評価を開始するために、必要なAPI キーを設定してください
@@ -229,7 +272,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card> */}
 
-          {/* Anthropic API Key */}
+          {/* Anthropic API Key 設定カード（必須） */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -243,6 +286,7 @@ export default function SettingsPage() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="anthropic-key">API Key</Label>
+                {/* パスワードフィールドと表示切り替えボタン */}
                 <div className="relative">
                   <Input
                     id="anthropic-key"
@@ -253,6 +297,7 @@ export default function SettingsPage() {
                       setFormData({ ...formData, anthropicKey: e.target.value })
                     }
                   />
+                  {/* キー表示・非表示切り替えボタン */}
                   <Button
                     type="button"
                     variant="ghost"
@@ -268,13 +313,14 @@ export default function SettingsPage() {
                   </Button>
                 </div>
               </div>
+              {/* セキュリティに関する注意書き */}
               <div className="text-xs text-muted-foreground">
                 APIキーは暗号化されてSupabase Vaultに安全に保存されます
               </div>
             </CardContent>
           </Card>
 
-          {/* GitHub Personal Access Token */}
+          {/* GitHub Personal Access Token 設定カード（オプション） */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -288,6 +334,7 @@ export default function SettingsPage() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="github-token">Personal Access Token</Label>
+                {/* パスワードフィールドと表示切り替えボタン */}
                 <div className="relative">
                   <Input
                     id="github-token"
@@ -298,6 +345,7 @@ export default function SettingsPage() {
                       setFormData({ ...formData, githubToken: e.target.value })
                     }
                   />
+                  {/* トークン表示・非表示切り替えボタン */}
                   <Button
                     type="button"
                     variant="ghost"
@@ -313,6 +361,7 @@ export default function SettingsPage() {
                   </Button>
                 </div>
               </div>
+              {/* GitHubトークンの権限と使用方法の説明 */}
               <div className="text-xs text-muted-foreground">
                 必要な権限: repo, read:org
                 <br />
@@ -321,14 +370,15 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          {/* 保存ボタン */}
+          {/* 設定保存ボタン */}
           <div className="flex justify-end">
             <Button
               onClick={handleSave}
-              disabled={isSaving || !formData.anthropicKey}
+              disabled={isSaving || !formData.anthropicKey}  // Anthropic Keyは必須
               className="flex items-center gap-2"
             >
               {isSaving ? (
+                // 保存中のスピナー表示
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-background"></div>
               ) : (
                 <Save className="w-4 h-4" />
@@ -337,13 +387,14 @@ export default function SettingsPage() {
             </Button>
           </div>
 
-          {/* 注意事項 */}
+          {/* 重要な注意事項のカード */}
           <Card className="border-yellow-500/20 bg-yellow-500/10">
             <CardContent className="pt-6">
               <div className="text-sm space-y-2">
                 <div className="font-medium text-yellow-700 dark:text-yellow-300">
                   ⚠️ 重要な注意事項
                 </div>
+                {/* APIキー設定に関する注意点一覧 */}
                 <ul className="list-disc list-inside space-y-1 text-yellow-600 dark:text-yellow-400">
                   <li>
                     Anthropic API
