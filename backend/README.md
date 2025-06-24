@@ -1,167 +1,321 @@
-# HackScoreAI Backend - 【backend_1】〜【backend_4】実装
+# HackScore AI Backend - Supabase統合プラットフォーム + Cloud Run Worker
 
-## 概要
-GitHub リポジトリを ClaudeCode で解析し、ハッカソン評価基準に基づくスコアを自動生成するバックエンドシステムです。
+GitHub リポジトリを**Claude Code SDK**で自動解析し、ハッカソン評価基準に基づくスコアを自動生成するバックエンドシステム。
 
-## 構成
-- **enqueue**: ジョブをキューに投入するEdge Function
-- **repo_worker**: ClaudeCode実行とリポジトリ解析を行うEdge Worker
-- **vault_test**: Vault機能のテスト用Edge Function
-- **pgmq**: PostgreSQLベースのメッセージキューシステム
-- **Vault**: AnthropicキーとGitHubトークンの暗号化管理
-- **ClaudeCode SDK**: リポジトリ解析とハッカソン評価の実行
-- **評価結果DB**: JSON評価結果の構造化保存
+> **🤖 AIエージェント開発者向け学習ポイント**  
+> このバックエンドは、サーバーレス制約を克服した**Claude Code SDK統合パターン**、**Supabase統合プラットフォーム**活用、**安全なAPIキー管理**の実装を学べます。
 
-## セットアップ手順
+## 🏗️ アーキテクチャ概要
 
-### 1. 環境変数の設定
+```mermaid
+graph TB
+    subgraph "Supabase統合プラットフォーム"
+        Auth[Supabase Auth<br/>GitHub OAuth]
+        Edge[Edge Functions<br/>Hono + Deno]
+        DB[(PostgreSQL<br/>pgmq Queue)]
+        Vault[🔐 Supabase Vault<br/>AES-256暗号化]
+    end
+    
+    subgraph "Cloud Run AI Worker"
+        Worker[Express.js Server<br/>Claude Code SDK]
+        MCP[MCP GitHub Tool<br/>リポジトリ解析]
+        Evaluation[評価エンジン<br/>構造化JSON出力]
+    end
+    
+    subgraph "External Services"
+        GitHub[GitHub API<br/>Repository Access]
+        Claude[Anthropic Claude<br/>AI Analysis Engine]
+    end
+    
+    Edge --> DB
+    Edge <--> Vault
+    Edge --> Worker
+    Worker --> MCP
+    MCP --> GitHub
+    Worker --> Claude
+    Worker --> DB
+    Auth <--> DB
+    
+    style Edge fill:#f3e5f5
+    style Worker fill:#fff3e0
+    style Vault fill:#ffebee
+    style DB fill:#e8f5e8
+```
+
+## 🚀 技術スタック・構成
+
+| 層 | 技術 | 役割 | AIエージェント開発での学習価値 |
+|---|---|---|---|
+| **API・認証** | Supabase Edge Functions (Hono + Deno) | RESTful API、ジョブ管理、認証 | 🚀 サーバーレスAPI設計パターン |
+| **データ・キュー** | PostgreSQL + pgmq + Vault | データ永続化、非同期処理、暗号化 | 📊 スケーラブルなデータ管理 |
+| **AI処理** | Cloud Run + Claude Code SDK + MCP | AIエージェント実行環境 | 🤖 **Claude Code SDK実装パターン** |
+| **セキュリティ** | Supabase Vault + RLS | APIキー暗号化、アクセス制御 | 🔐 **企業レベルセキュリティ** |
+
+## 📁 プロジェクト構造
+
+```
+backend/
+├── supabase/                   # Supabase統合プラットフォーム
+│   ├── functions/              # Edge Functions (Deno + Hono)
+│   │   ├── enqueue/           # 🎯 ジョブキュー投入
+│   │   ├── repo_worker/       # 👷 ジョブ処理ワーカー
+│   │   ├── add-repository/    # ➕ リポジトリ追加
+│   │   ├── delete-hackathon/  # 🗑️ ハッカソン削除
+│   │   ├── remove-repository/ # ➖ リポジトリ削除
+│   │   ├── retry-repository/  # 🔄 リトライ処理
+│   │   └── vault_test/       # 🔐 Vault機能テスト
+│   ├── migrations/            # データベーススキーマ
+│   ├── config.toml           # Supabase設定
+│   └── .env.example          # Edge Functions環境変数
+├── cloud-run-worker/          # Claude Code SDK実行環境
+│   ├── src/index.js          # Express.js + Claude Code SDK
+│   ├── mcp-config.json       # MCP設定 (GitHub Tool)
+│   ├── Dockerfile            # Container定義
+│   └── .env.example          # Worker環境変数
+└── README.md                 # このファイル
+```
+
+## 🔧 主要コンポーネント
+
+### 1. 🎯 Edge Functions (Supabase)
+
+#### **enqueue** - ジョブキュー投入
+```typescript
+// ハッカソン評価ジョブをpgmqキューに投入
+const { data, error } = await supabase.functions.invoke("enqueue", {
+  body: {
+    repositories: ["user/repo1", "user/repo2"],
+    userId: "user-uuid",
+    evaluationCriteria: { hackathonName: "AI Contest 2024" }
+  }
+});
+```
+**学習ポイント**:
+- CORS対応パターン
+- JWT認証統合
+- pgmqキューシステム活用
+
+#### **repo_worker** - ジョブ処理ワーカー
+```typescript
+// pgmqからジョブを取得してCloud Run Workerに転送
+const jobs = await supabase.rpc('get_pending_jobs');
+// Cloud Run Workerに処理依頼
+await fetch(cloudRunUrl + '/process', { body: jobData });
+```
+**学習ポイント**:
+- ポーリング型ワーカーパターン
+- 外部サービス連携
+- 失敗時フォールバック処理
+
+### 2. 🤖 Cloud Run Worker (Claude Code SDK実行環境)
+
+#### **Express.js + Claude Code SDK統合**
+```javascript
+// Claude Code SDKプロセスの起動と管理
+const claudeProcess = spawn('claude-code', [
+  '--api-key', anthropicKey,
+  '--mcp-config', './mcp-config.json',
+  'chat'
+], {
+  env: { GITHUB_TOKEN: githubToken }
+});
+
+// MCP GitHub Toolによるリポジトリ解析
+claudeProcess.stdin.write(`
+GitHub repository ${repository} を解析し、以下の評価基準でハッカソンスコアを生成してください：
+...
+`);
+```
+
+**学習ポイント**:
+- **サーバーレス制約の回避**: Edge Functionsで不可能なClaude Code SDK実行
+- **MCP統合**: GitHub Tool活用による外部サービス連携
+- **ストリーミング処理**: AIからのレスポンス解析パターン
+
+### 3. 🔐 Supabase Vault (安全なAPIキー管理)
+
+#### **暗号化保存・復号化**
+```sql
+-- AES-256暗号化によるAPIキー保存
+CREATE OR REPLACE FUNCTION store_user_secret(
+  p_user_id UUID,
+  p_secret_type TEXT,
+  p_secret_name TEXT,
+  p_secret_value TEXT
+) RETURNS JSON AS $$
+BEGIN
+  INSERT INTO user_secrets (user_id, secret_type, secret_name, encrypted_secret)
+  VALUES (p_user_id, p_secret_type, p_secret_name, 
+         pgp_sym_encrypt(p_secret_value, get_vault_key()));
+END;
+$$ LANGUAGE plpgsql;
+```
+
+**学習ポイント**:
+- **企業レベル暗号化**: AES-256による機密情報保護
+- **ユーザー分離**: Row Level Security (RLS) 活用
+- **統合アクセス**: Edge FunctionsからのシームレスなVault操作
+
+### 4. 📊 データベーススキーマ
+
+#### **主要テーブル**
+```sql
+-- ハッカソン管理
+CREATE TABLE hackathons (
+  id UUID PRIMARY KEY,
+  name VARCHAR(255),
+  user_id UUID,
+  status VARCHAR(50), -- pending, analyzing, completed, failed
+  total_repositories INTEGER,
+  completed_repositories INTEGER,
+  average_score NUMERIC(5,2)
+);
+
+-- ジョブ管理
+CREATE TABLE job_status (
+  id UUID PRIMARY KEY,
+  hackathon_id UUID,
+  status VARCHAR(50), -- pending, processing, completed, failed
+  payload JSONB,
+  result JSONB
+);
+
+-- 評価結果
+CREATE TABLE evaluation_results (
+  id UUID PRIMARY KEY,
+  hackathon_id UUID,
+  repository_name VARCHAR(255),
+  total_score INTEGER,
+  evaluation_data JSONB,
+  processing_metadata JSONB -- Claude Code SDKのコスト情報等
+);
+```
+
+## 🛠️ セットアップ
+
+### 1. Supabase環境起動
+
 ```bash
-cd backend
+cd backend/supabase
+
+# 環境変数設定
 cp .env.example .env
-# .envファイルを編集してVAULT_SECRET_KEYなどを設定
-```
+# 編集: VAULT_SECRET_KEY, CLOUD_RUN_AUTH_TOKEN等
 
-### 2. Supabaseローカル環境の起動
-```bash
+# Supabaseローカル環境起動
 supabase start
-```
 
-### 3. Edge Functionsの起動
-```bash
-# 別のターミナルで実行
+# Edge Functions起動
 supabase functions serve
 ```
 
-## 動作確認
+### 2. Cloud Run Worker起動
 
-### 【backend_1】キューテスト
 ```bash
+cd backend/cloud-run-worker
+
+# 環境変数設定
+cp .env.example .env
+# 編集: SUPABASE_URL, ANTHROPIC_API_KEY等
+
+# 依存関係インストール・起動
+npm install
+npm run dev
+```
+
+### 3. 動作確認
+
+```bash
+# 🧪 キューシステムテスト
 node test-queue.js
-```
 
-### 【backend_2】Vaultテスト
-```bash
+# 🔐 Vault暗号化テスト
 node test-vault.js
-```
 
-### 【backend_3】【backend_4】実際のAPIキー登録
-```bash
-# 対話式でAPIキーを登録
-node register-keys.js
-
-# または手動でAPIキーを登録
-curl -X POST "http://localhost:54321/functions/v1/vault_test" \
-  -H "Authorization: Bearer [ANON_KEY]" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "action": "store",
-    "userId": "11111111-1111-1111-1111-111111111111",
-    "secretType": "anthropic_key",
-    "secretName": "production",
-    "secretValue": "sk-ant-api03-YOUR-ACTUAL-KEY"
-  }'
-```
-
-### 【backend_3】【backend_4】完全パイプラインテスト
-```bash
-# 実際のAPI呼び出しを含むテスト（料金が発生します）
+# 🤖 Claude Code SDK統合テスト (APIキー要設定)
 node test-full-pipeline.js --confirm
 ```
 
-#### キューテストの内容：
-1. ジョブをキューに投入
-2. ジョブステータスの確認
-3. ワーカーの手動実行
-4. 処理結果の確認
+## 🧪 主要テストシナリオ
 
-#### Vaultテストの内容：
-1. 暗号化・復号化テスト
-2. シークレット保存・取得テスト
-3. ユーザーシークレット一覧表示
-4. Edge WorkerからのVaultキー取得テスト
+### 1. **pgmqキューシステム**
+- ジョブ投入 → キュー格納 → ワーカー取得 → 処理完了
+- 失敗時のリトライ機能
+- 同時実行制御
 
-### 手動でのAPI呼び出し
+### 2. **Supabase Vault暗号化**
+- APIキー暗号化保存
+- ユーザー別アクセス制御
+- Edge Functionsからの安全な取得
 
-#### ジョブの投入
+### 3. **Claude Code SDK統合**
+- GitHub MCP Toolによるリポジトリ解析
+- AIによるハッカソン評価基準での採点
+- 構造化JSONレスポンスの解析
+
+### 4. **完全パイプライン**
+- フロントエンド → Edge Functions → Cloud Run → AI解析 → 結果保存
+
+## 🚀 本番デプロイ
+
+### Supabase
 ```bash
-curl -X POST http://localhost:54321/functions/v1/enqueue/enqueue \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "repositories": ["user/repo1", "user/repo2"],
-    "evaluationCriteria": {
-      "codeQuality": 0.3,
-      "documentation": 0.2,
-      "innovation": 0.3,
-      "complexity": 0.2
-    }
-  }'
+# データベースマイグレーション
+supabase db push
+
+# Edge Functions デプロイ
+supabase functions deploy enqueue
+supabase functions deploy repo_worker
+# ... 他のFunctionsも同様
 ```
 
-#### ジョブステータスの確認
+### Cloud Run Worker
 ```bash
-curl http://localhost:54321/functions/v1/enqueue/status/{jobId} \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0"
+cd backend/cloud-run-worker
+
+# Docker ビルド・デプロイ
+./scripts/deploy.sh
+
+# または手動デプロイ
+gcloud run deploy hackscore-worker \
+  --source . \
+  --platform managed \
+  --region us-central1
 ```
 
-#### ワーカーの手動実行
-```bash
-curl -X POST http://localhost:54321/functions/v1/repo_worker/process \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0" \
-  -H "Content-Type: application/json"
+## 🎓 AIエージェント開発での学習価値
+
+### 1. **サーバーレス制約の解決パターン**
+```mermaid
+graph LR
+    A[Edge Functions<br/>制約あり] --> B[Cloud Run<br/>制約なし]
+    A -.->|❌| C[Claude Code SDK<br/>実行不可]
+    B -.->|✅| D[Claude Code SDK<br/>実行可能]
 ```
+- **問題**: Edge FunctionsではClaude Code SDK実行不可
+- **解決**: アーキテクチャ分離によるハイブリッド構成
 
-## データベーステーブル
+### 2. **Supabase統合プラットフォーム活用**
+- **認証**: GitHub OAuth統合
+- **データベース**: PostgreSQL + リアルタイム機能
+- **API**: Edge Functions (Deno + Hono)
+- **セキュリティ**: Vault + RLS
+- **キュー**: pgmq による非同期処理
 
-### job_status
-ジョブの状態を管理するテーブル
-- `id`: ジョブID
-- `queue_message_id`: pgmqのメッセージID
-- `status`: pending | queued | processing | completed | failed
-- `payload`: ジョブのペイロード
-- `result`: 処理結果
-- `error`: エラーメッセージ
+### 3. **企業レベルセキュリティパターン**
+- AES-256暗号化による機密情報保護
+- Row Level Security (RLS) によるデータ分離
+- JWT認証によるAPI保護
+- 監査ログによる操作追跡
 
-### user_secrets
-暗号化されたユーザーシークレットを管理するテーブル
-- `id`: シークレットID
-- `user_id`: ユーザーID
-- `secret_type`: シークレットタイプ（anthropic_key, github_tokenなど）
-- `secret_name`: シークレット名
-- `encrypted_secret`: 暗号化されたシークレット値
-- `created_at`, `updated_at`: 作成・更新日時
+### 4. **MCP (Model Context Protocol) 活用**
+- GitHub Tool統合による外部サービス連携
+- 拡張可能なツールエコシステム
+- AI能力の動的拡張パターン
 
-### Vault関数
-- `store_user_secret()`: シークレット保存
-- `get_user_secret()`: シークレット取得
-- `get_secret_for_job()`: Edge Function用シークレット取得
-- `list_user_secrets()`: ユーザーシークレット一覧
+---
 
-## 実装済み機能
+> **💡 このバックエンドから学べること**  
+> サーバーレス制約の解決方法、Supabase統合プラットフォーム活用、Claude Code SDK実践パターン、企業レベルセキュリティ実装
 
-### 【backend_1】✅ 完了
-- pgmqベースのキューシステム
-- Edge Function (enqueue) でのジョブ投入
-- Edge Worker (repo_worker) でのキュー処理
-- ジョブステータス管理
-
-### 【backend_2】✅ 完了
-- pgcryptoベースの暗号化Vault
-- ユーザーシークレット管理
-- Edge WorkerからのVaultキー取得
-- 暗号化・復号化の完全テスト
-
-### 【backend_3】✅ 完了
-- ClaudeCode SDKの実装（参考ソースを基に）
-- Edge WorkerでのClaudeCode実行統合
-- GitHub MCPを使用したリポジトリ解析
-- ハッカソン評価基準による採点
-
-### 【backend_4】✅ 完了
-- 評価結果JSONの自動検知
-- evaluation_resultsテーブルへの構造化保存
-- evaluation_itemsテーブルでの詳細評価項目管理
-- SQLクエリ関数による結果取得
-
-## 🎉 全機能実装完了
-バックエンドの全ての要件が実装され、テスト可能な状態です。
+**Happy Coding! 🚀**
