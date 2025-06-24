@@ -562,4 +562,32 @@ export const hackathonOperations = {
       return { success: false, error };
     }
   },
+
+  // 全APIコストの合計を取得
+  async getTotalApiCost(userId: string) {
+    try {
+      // evaluation_resultsテーブルから該当ユーザーの全てのコストを取得
+      const { data, error } = await supabase
+        .from("evaluation_results")
+        .select("processing_metadata")
+        .eq("user_id", userId);
+
+      if (error) throw error;
+
+      // 合計コストを計算
+      let totalCost = 0;
+      if (data) {
+        data.forEach((result) => {
+          if (result.processing_metadata?.totalCostUsd) {
+            totalCost += result.processing_metadata.totalCostUsd;
+          }
+        });
+      }
+
+      return { success: true, data: totalCost };
+    } catch (error) {
+      console.error("Error getting total API cost:", error);
+      return { success: false, error };
+    }
+  },
 };

@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { OctocatCharacter } from "@/components/octocat-character";
 import { BinaryBackground } from "@/components/binary-background";
+import { CommonHeader } from "@/components/common-header";
 import { toast } from "sonner";
 
 interface HackathonDetails {
@@ -532,28 +533,26 @@ export default function HackathonDetailPage() {
     <div className="min-h-screen bg-background relative">
       <BinaryBackground />
       {/* ヘッダー */}
-      <header className="border-b border-border bg-card relative z-10">
+      <CommonHeader />
+
+      {/* ハッカソン名とステータス */}
+      <div className="border-b border-border bg-card relative z-10">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center gap-4">
             <Button variant="outline" size="sm" onClick={() => router.back()}>
               <ArrowLeft className="w-4 h-4" />
             </Button>
-            <div className="flex items-center gap-4">
-              <div className="w-8 h-8">
-                <OctocatCharacter />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-foreground">
-                  {hackathon.name}
-                </h1>
-                <div className={`text-sm ${getStatusColor(hackathon.status)}`}>
-                  {getStatusText(hackathon.status)}
-                </div>
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">
+                {hackathon.name}
+              </h1>
+              <div className={`text-sm ${getStatusColor(hackathon.status)}`}>
+                {getStatusText(hackathon.status)}
               </div>
             </div>
           </div>
         </div>
-      </header>
+      </div>
 
       <main className="container mx-auto px-4 py-8 max-w-4xl relative z-10">
         <div className="space-y-6">

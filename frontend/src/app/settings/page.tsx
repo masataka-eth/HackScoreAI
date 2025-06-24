@@ -14,8 +14,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ArrowLeft, Key, Github, Save, Eye, EyeOff } from "lucide-react";
-import { OctocatCharacter } from "@/components/octocat-character";
 import { BinaryBackground } from "@/components/binary-background";
+import { CommonHeader } from "@/components/common-header";
 
 export default function SettingsPage() {
   const { user, loading } = useAuth();
@@ -181,21 +181,19 @@ export default function SettingsPage() {
     <div className="min-h-screen bg-background relative">
       <BinaryBackground />
       {/* ヘッダー */}
-      <header className="border-b border-border bg-card relative z-10">
+      <CommonHeader />
+
+      {/* ページタイトル */}
+      <div className="border-b border-border bg-card relative z-10">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center gap-4">
             <Button variant="outline" size="sm" onClick={() => router.back()}>
               <ArrowLeft className="w-4 h-4" />
             </Button>
-            <div className="flex items-center gap-4">
-              <div className="w-10 h-10">
-                <OctocatCharacter size="48" />
-              </div>
-              <h1 className="text-2xl font-bold text-foreground">設定</h1>
-            </div>
+            <h1 className="text-2xl font-bold text-foreground">設定</h1>
           </div>
         </div>
-      </header>
+      </div>
 
       <main className="container mx-auto px-4 py-8 max-w-2xl relative z-10">
         <div className="space-y-6">

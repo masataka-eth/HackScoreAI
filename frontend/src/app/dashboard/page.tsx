@@ -12,18 +12,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   Plus,
-  Settings,
-  LogOut,
   Trophy,
   Code,
   Clock,
-  Play,
   Trash2,
   MoreVertical,
 } from "lucide-react";
-import { OctocatCharacter } from "@/components/octocat-character";
 import { BinaryBackground } from "@/components/binary-background";
-import Image from "next/image";
+import { CommonHeader } from "@/components/common-header";
 
 interface Hackathon {
   id: string;
@@ -37,11 +33,10 @@ interface Hackathon {
 }
 
 export default function DashboardPage() {
-  const { user, loading, signOut } = useAuth();
+  const { user, loading } = useAuth();
   const router = useRouter();
   const [hackathons, setHackathons] = useState<Hackathon[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
     if (loading) return;
@@ -80,29 +75,6 @@ export default function DashboardPage() {
     loadHackathons();
   }, [user]);
 
-  // 手動でワーカー処理をトリガー
-  const triggerProcessing = async () => {
-    setIsProcessing(true);
-    try {
-      const { hackathonOperations } = await import("@/lib/supabase");
-      const result = await hackathonOperations.triggerWorkerProcessing();
-
-      if (result.success) {
-        alert("処理を開始しました。しばらくしてからページを更新してください。");
-        // 1秒後にハッカソン一覧を再読み込み
-        setTimeout(() => {
-          loadHackathons();
-        }, 1000);
-      } else {
-        alert("処理の開始に失敗しました");
-      }
-    } catch (error) {
-      console.error("Error triggering processing:", error);
-      alert("処理の開始に失敗しました");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
 
   // 定期的にハッカソン一覧を更新
   useEffect(() => {
@@ -114,6 +86,29 @@ export default function DashboardPage() {
 
     return () => clearInterval(interval);
   }, [user]);
+
+  // ページにフォーカスが戻ってきたときにデータを再取得
+  useEffect(() => {
+    const handleFocus = () => {
+      loadHackathons();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    
+    // visibilitychange イベントも監視
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadHackathons();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   // ハッカソンを削除
   const handleDeleteHackathon = async (hackathonId: string, hackathonName: string) => {
@@ -152,74 +147,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-background relative">
       <BinaryBackground />
-      {/* ヘッダー */}
-      <header className="border-b border-border bg-card relative z-10">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">
-                {user.email}
-              </span>
-            </div>
-
-            {/* 中央のキャラクターとタイトル */}
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12">
-                <OctocatCharacter size="48" />
-              </div>
-              <Image
-                src="/logo.png"
-                alt="HackScore AI"
-                width={200}
-                height={40}
-                className="w-auto h-8"
-                priority
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              {/* 開発者モード: Shift+Ctrl+クリックで手動開始ボタンを表示 */}
-              {process.env.NODE_ENV === "development" && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={(e) => {
-                    if (e.shiftKey && e.ctrlKey) {
-                      triggerProcessing();
-                    }
-                  }}
-                  disabled={isProcessing}
-                  title="開発者モード: Shift+Ctrl+クリックで手動処理開始"
-                  className="opacity-30 hover:opacity-100"
-                >
-                  {isProcessing ? (
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
-                  ) : (
-                    <Play className="w-4 h-4" />
-                  )}
-                </Button>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => router.push("/settings")}
-              >
-                <Settings className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={async () => {
-                  await signOut();
-                  router.push("/login");
-                }}
-              >
-                <LogOut className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
+      <CommonHeader />
 
       <main className="container mx-auto px-4 py-8 relative z-10">
         {/* ハッカソン一覧 */}
