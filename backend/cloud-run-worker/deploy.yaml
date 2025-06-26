@@ -4,11 +4,12 @@ metadata:
   name: hackscore-claudecode-worker
   annotations:
     run.googleapis.com/ingress: all
-    run.googleapis.com/execution-environment: gen2
 spec:
   template:
     metadata:
       annotations:
+        # Execution environment (gen2) - Revisionレベルで設定
+        run.googleapis.com/execution-environment: gen2
         # Timeout for processing (5 minutes)
         run.googleapis.com/timeout: "300s"
         # Memory allocation
@@ -23,53 +24,53 @@ spec:
       containerConcurrency: 1000
       timeoutSeconds: 300
       containers:
-      - image: gcr.io/PROJECT_ID/hackscore-claudecode-worker
-        ports:
-        - containerPort: 8080
-        env:
-        # Supabase Configuration
-        - name: SUPABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: hackscore-secrets
-              key: SUPABASE_URL
-        - name: SUPABASE_SERVICE_ROLE_KEY
-          valueFrom:
-            secretKeyRef:
-              name: hackscore-secrets
-              key: SUPABASE_SERVICE_ROLE_KEY
-        
-        # Server Configuration
-        - name: PORT
-          value: "8080"
-        - name: NODE_ENV
-          value: "production"
-        
-        # Authentication
-        - name: CLOUD_RUN_AUTH_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: hackscore-secrets
-              key: CLOUD_RUN_AUTH_TOKEN
-        
-        # Processing Configuration
-        - name: MAX_TURNS_PER_ANALYSIS
-          value: "50"
-        - name: ANALYSIS_TIMEOUT_MS
-          value: "300000"
-        
-        # Logging
-        - name: LOG_LEVEL
-          value: "info"
-        
-        # Cost Management
-        - name: ESTIMATED_COST_PER_TOKEN
-          value: "0.000003"
-        
-        resources:
-          limits:
-            memory: "2Gi"
-            cpu: "1000m"
-          requests:
-            memory: "1Gi"
-            cpu: "500m"
+        - image: asia-northeast1-docker.pkg.dev/hackscore-ai-production/hackscore-repo/hackscore-claudecode-worker:latest
+          ports:
+            - containerPort: 8080
+          env:
+            # Supabase Configuration
+            - name: SUPABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-url
+                  key: latest
+            - name: SUPABASE_SERVICE_ROLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-service-role-key
+                  key: latest
+
+            # Server Configuration
+            - name: NODE_ENV
+              value: "production"
+            - name: DEPLOY_VERSION
+              value: "v1.0.1"
+
+            # Authentication
+            - name: CLOUD_RUN_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cloud-run-auth-token
+                  key: latest
+
+            # Processing Configuration
+            - name: MAX_TURNS_PER_ANALYSIS
+              value: "50"
+            - name: ANALYSIS_TIMEOUT_MS
+              value: "300000"
+
+            # Logging
+            - name: LOG_LEVEL
+              value: "info"
+
+            # Cost Management
+            - name: ESTIMATED_COST_PER_TOKEN
+              value: "0.000003"
+
+          resources:
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
