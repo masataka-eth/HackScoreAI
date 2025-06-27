@@ -1,30 +1,33 @@
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
-  name: hackscore-claudecode-worker
+  name: hackscore-ai-worker
   annotations:
     run.googleapis.com/ingress: all
+    run.googleapis.com/description: "HackScore AI Worker - GitHub repository analysis service using Claude Code SDK"
 spec:
   template:
     metadata:
       annotations:
-        # Execution environment (gen2) - Revisionレベルで設定
+        # Execution environment (gen2) - Revision level configuration
         run.googleapis.com/execution-environment: gen2
-        # Timeout for processing (5 minutes)
-        run.googleapis.com/timeout: "300s"
-        # Memory allocation
-        run.googleapis.com/memory: "2Gi"
-        # CPU allocation
-        run.googleapis.com/cpu: "1000m"
-        # Max instances
+        # Timeout for processing (60 minutes - Cloud Run maximum)
+        run.googleapis.com/timeout: "3600s"
+        # Memory allocation for large repository analysis
+        run.googleapis.com/memory: "4Gi"
+        # CPU allocation for intensive processing
+        run.googleapis.com/cpu: "2000m"
+        # Max instances for scaling
         autoscaling.knative.dev/maxScale: "10"
         # Min instances (0 for cost efficiency)
         autoscaling.knative.dev/minScale: "0"
+        # VPC connector (if needed)
+        # run.googleapis.com/vpc-access-connector: projects/PROJECT_ID/locations/REGION/connectors/CONNECTOR_NAME
     spec:
       containerConcurrency: 1000
-      timeoutSeconds: 300
+      timeoutSeconds: 3600
       containers:
-        - image: asia-northeast1-docker.pkg.dev/hackscore-ai-production/hackscore-repo/hackscore-claudecode-worker:latest
+        - image: asia-northeast1-docker.pkg.dev/hackscore-ai-production/hackscore-repo/hackscore-ai-worker:latest
           ports:
             - containerPort: 8080
           env:
@@ -43,8 +46,10 @@ spec:
             # Server Configuration
             - name: NODE_ENV
               value: "production"
+            - name: PORT
+              value: "8080"
             - name: DEPLOY_VERSION
-              value: "v1.0.1"
+              value: "v1.0.0"
 
             # Authentication
             - name: CLOUD_RUN_AUTH_TOKEN
@@ -55,9 +60,9 @@ spec:
 
             # Processing Configuration
             - name: MAX_TURNS_PER_ANALYSIS
-              value: "50"
+              value: "200"
             - name: ANALYSIS_TIMEOUT_MS
-              value: "300000"
+              value: "1800000"
 
             # Logging
             - name: LOG_LEVEL
@@ -67,10 +72,47 @@ spec:
             - name: ESTIMATED_COST_PER_TOKEN
               value: "0.000003"
 
+            # Claude Code SDK Configuration for Cloud Run
+            - name: NPM_CONFIG_PREFIX
+              value: "/tmp/.npm-global"
+            - name: PATH
+              value: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/tmp/.npm-global/bin"
+            - name: HOME
+              value: "/tmp"
+            - name: TMPDIR
+              value: "/tmp"
+            - name: NPM_CONFIG_CACHE
+              value: "/tmp/.npm"
+            - name: NPM_CONFIG_UNSAFE_PERM
+              value: "true"
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=8192"
+            - name: XDG_CONFIG_HOME
+              value: "/tmp/.config"
+
           resources:
             limits:
+              memory: "4Gi"
+              cpu: "2000m"
+            requests:
               memory: "2Gi"
               cpu: "1000m"
-            requests:
-              memory: "1Gi"
-              cpu: "500m"
+
+          # Health check configuration
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3

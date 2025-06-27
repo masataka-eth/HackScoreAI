@@ -1,18 +1,40 @@
 {
-  "name": "hackscore-cloudrun-worker",
+  "name": "hackscore-ai-worker",
   "version": "1.0.0",
-  "description": "ClaudeCode worker for HackScoreAI on Cloud Run",
+  "description": "High-performance GitHub repository analysis worker using Claude Code SDK for hackathon evaluation",
   "main": "src/index.js",
   "type": "module",
+  "keywords": [
+    "github",
+    "repository-analysis",
+    "claude",
+    "anthropic",
+    "hackathon",
+    "ai",
+    "code-analysis",
+    "supabase",
+    "queue-processing"
+  ],
+  "author": "HackScore AI Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/hackscore-ai"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/hackscore-ai/issues"
+  },
+  "homepage": "https://github.com/your-org/hackscore-ai#readme",
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "build": "echo 'No build step required'",
-    "test": "echo 'No tests specified'",
-    "dev:setup": "./scripts/dev.sh",
-    "deploy": "./scripts/deploy.sh",
-    "docker:build": "docker build -t hackscore-claudecode-worker .",
-    "docker:run": "docker run -p 8080:8080 --env-file .env hackscore-claudecode-worker"
+    "test": "echo 'Tests not implemented yet' && exit 0",
+    "lint": "eslint src/",
+    "format": "prettier --write src/",
+    "docker:build": "docker build -t hackscore-worker .",
+    "docker:run": "docker run -p 8080:8080 --env-file .env hackscore-worker",
+    "deploy:cloud-run": "./scripts/deploy.sh",
+    "setup:compute-engine": "./compute-engine-setup.sh"
   },
   "dependencies": {
     "@anthropic-ai/claude-code": "^1.0.31",
@@ -20,7 +42,20 @@
     "express": "^4.18.2",
     "dotenv": "^16.3.1"
   },
+  "devDependencies": {
+    "eslint": "^8.0.0",
+    "prettier": "^3.0.0"
+  },
   "engines": {
-    "node": ">=18.0.0"
-  }
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "os": [
+    "linux",
+    "darwin"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
 }
