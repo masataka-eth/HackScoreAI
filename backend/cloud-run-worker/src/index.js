@@ -1,9 +1,9 @@
 /**
  * Cloud Run Worker - GitHubリポジトリ評価システム
- * 
+ *
  * このWorkerは、Supabaseのキュー（pgmq）からGitHubリポジトリ評価ジョブを取得し、
  * Claude Code SDKを使用してリポジトリを解析・評価を行います。
- * 
+ *
  * 主な機能：
  * - Supabase pgmqキューからジョブを取得・処理
  * - Claude Code SDK + GitHub MCPを使用したリポジトリ解析
@@ -14,7 +14,6 @@
 
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
-import { query } from "@anthropic-ai/claude-code";
 import "dotenv/config";
 
 // Express.jsアプリケーションの設定
@@ -51,7 +50,7 @@ const config = {
   },
   processing: {
     maxTurns: parseInt(process.env.MAX_TURNS_PER_ANALYSIS) || 50,
-    timeoutMs: parseInt(process.env.ANALYSIS_TIMEOUT_MS) || 300000,
+    timeoutMs: parseInt(process.env.ANALYSIS_TIMEOUT_MS) || 3300000,
   },
   logging: {
     level: process.env.LOG_LEVEL || "info",
@@ -123,8 +122,12 @@ app.post("/process", authenticateRequest, async (req, res) => {
     // Ensure job_status record exists
     await ensureJobStatus(jobId, userId, { ...req.body, hackathonId });
 
-    // Get user secrets directly from Supabase Vault (secure)
+    // Vaultからユーザーの秘密情報を取得
     const secrets = await getUserSecrets(userId);
+
+    console.log(`🔑 Retrieved secrets from Vault for user: ${userId}`);
+    console.log(`🔑 Anthropic Key available: ${!!secrets.anthropicKey}`);
+    console.log(`🔑 GitHub Token available: ${!!secrets.githubToken}`);
 
     // Process the single repository with ClaudeCode
     const result = await processRepositoryWithClaudeCode(
@@ -244,13 +247,13 @@ app.post("/poll", authenticateRequest, async (req, res) => {
       // Read from pgmq queue with extended timeout
       console.log("🔍 Reading from pgmq queue with params:", {
         queue_name: "repo_analysis_queue",
-        visibility_timeout: 1800, // 30分に大幅延長（処理時間余裕を考慮）
+        visibility_timeout: 3600, // 60分（Cloud Run最大タイムアウト）
         qty: 1,
       });
 
       const { data: messages, error } = await supabase.rpc("pgmq_read", {
         queue_name: "repo_analysis_queue",
-        visibility_timeout: 1800, // 30分に大幅延長（処理時間余裕を考慮）
+        visibility_timeout: 3600, // 60分（Cloud Run最大タイムアウト）
         qty: 1,
       });
 
@@ -298,68 +301,115 @@ app.post("/poll", authenticateRequest, async (req, res) => {
         console.log(
           `🚀 Starting processing for job ${message.message.jobId}...`
         );
-        const processResult = await fetch(
-          `http://localhost:${config.server.port}/process`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${config.auth.token}`,
-            },
-            body: JSON.stringify(message.message),
-          }
-        );
+        // AbortControllerを使用してタイムアウトを設定
+        const controller = new AbortController();
+        const timeout = setTimeout(() => {
+          controller.abort();
+        }, config.processing.timeoutMs + 300000); // 処理タイムアウト + 5分のバッファ
 
-        if (processResult.ok) {
-          console.log(
-            `✅ Job ${message.message.jobId} processing completed successfully`
-          );
-
-          // Delete message from queue on success with verification
-          console.log(`🗑️ Deleting message ${message.msg_id} from queue...`);
-          const { data: deleteResult, error: deleteError } = await supabase.rpc(
-            "pgmq_delete",
+        try {
+          const processResult = await fetch(
+            `http://localhost:${config.server.port}/process`,
             {
-              queue_name: "repo_analysis_queue",
-              msg_id: message.msg_id,
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${config.auth.token}`,
+              },
+              body: JSON.stringify(message.message),
+              signal: controller.signal,
             }
           );
 
-          if (deleteError) {
-            console.error(
-              `❌ Failed to delete message ${message.msg_id}:`,
-              deleteError
-            );
-            hasErrors = true;
-            lastError = `Delete failed: ${deleteError.message}`;
-          } else {
-            console.log(
-              `✅ Successfully deleted message ${message.msg_id}, result:`,
-              deleteResult
-            );
-            messageHandled = true;
-          }
+          clearTimeout(timeout); // タイムアウトをクリア
 
-          console.log(`✅ Successfully processed job ${message.message.jobId}`);
-          processedJobs.push({
-            messageId: message.msg_id,
-            jobId: message.message.jobId,
-            deleted: !deleteError,
-          });
-          processedCount++;
-        } else {
-          const errorText = await processResult.text();
+          if (processResult.ok) {
+            console.log(
+              `✅ Job ${message.message.jobId} processing completed successfully`
+            );
+
+            // Delete message from queue on success with verification
+            console.log(`🗑️ Deleting message ${message.msg_id} from queue...`);
+            const { data: deleteResult, error: deleteError } =
+              await supabase.rpc("pgmq_delete", {
+                queue_name: "repo_analysis_queue",
+                msg_id: message.msg_id,
+              });
+
+            if (deleteError) {
+              console.error(
+                `❌ Failed to delete message ${message.msg_id}:`,
+                deleteError
+              );
+              hasErrors = true;
+              lastError = `Delete failed: ${deleteError.message}`;
+            } else {
+              console.log(
+                `✅ Successfully deleted message ${message.msg_id}, result:`,
+                deleteResult
+              );
+              messageHandled = true;
+            }
+
+            console.log(
+              `✅ Successfully processed job ${message.message.jobId}`
+            );
+            processedJobs.push({
+              messageId: message.msg_id,
+              jobId: message.message.jobId,
+              deleted: !deleteError,
+            });
+            processedCount++;
+          } else {
+            const errorText = await processResult.text();
+            console.error(
+              `❌ Job ${message.message.jobId} processing failed with status: ${processResult.status}, response: ${errorText}`
+            );
+
+            // Update job status to failed
+            await updateJobStatus(message.message.jobId, "failed", {
+              error: `Process endpoint returned status ${processResult.status}: ${errorText}`,
+            });
+
+            // Archive failed message with verification
+            console.log(`📦 Archiving failed message ${message.msg_id}...`);
+            const { data: archiveResult, error: archiveError } =
+              await supabase.rpc("pgmq_archive", {
+                queue_name: "repo_analysis_queue",
+                msg_id: message.msg_id,
+              });
+
+            if (archiveError) {
+              console.error(
+                `❌ Failed to archive message ${message.msg_id}:`,
+                archiveError
+              );
+            } else {
+              console.log(
+                `✅ Successfully archived message ${message.msg_id}, result:`,
+                archiveResult
+              );
+              messageHandled = true;
+            }
+
+            hasErrors = true;
+            lastError = `Process failed with status: ${processResult.status}`;
+          }
+        } catch (processError) {
+          clearTimeout(timeout); // タイムアウトをクリア
+
           console.error(
-            `❌ Job ${message.message.jobId} processing failed with status: ${processResult.status}, response: ${errorText}`
+            `❌ Job ${message.message.jobId} processing exception:`,
+            processError
           );
 
           // Update job status to failed
           await updateJobStatus(message.message.jobId, "failed", {
-            error: `Process endpoint returned status ${processResult.status}: ${errorText}`,
+            error: processError.message || "Unknown processing error",
           });
 
           // Archive failed message with verification
-          console.log(`📦 Archiving failed message ${message.msg_id}...`);
+          console.log(`📦 Archiving exception message ${message.msg_id}...`);
           const { data: archiveResult, error: archiveError } =
             await supabase.rpc("pgmq_archive", {
               queue_name: "repo_analysis_queue",
@@ -380,44 +430,26 @@ app.post("/poll", authenticateRequest, async (req, res) => {
           }
 
           hasErrors = true;
-          lastError = `Process failed with status: ${processResult.status}`;
+          lastError = processError.message;
         }
-      } catch (processError) {
+      } catch (outerError) {
         console.error(
-          `❌ Job ${message.message.jobId} processing exception:`,
-          processError
+          `❌ Outer processing error for job ${message.message.jobId}:`,
+          outerError
         );
-
-        // Update job status to failed
-        await updateJobStatus(message.message.jobId, "failed", {
-          error: processError.message || "Unknown processing error",
-        });
-
-        // Archive failed message with verification
-        console.log(`📦 Archiving exception message ${message.msg_id}...`);
-        const { data: archiveResult, error: archiveError } = await supabase.rpc(
-          "pgmq_archive",
-          {
-            queue_name: "repo_analysis_queue",
-            msg_id: message.msg_id,
-          }
-        );
-
-        if (archiveError) {
-          console.error(
-            `❌ Failed to archive message ${message.msg_id}:`,
-            archiveError
-          );
-        } else {
-          console.log(
-            `✅ Successfully archived message ${message.msg_id}, result:`,
-            archiveResult
-          );
-          messageHandled = true;
-        }
-
         hasErrors = true;
-        lastError = processError.message;
+        lastError = outerError.message;
+        // Try to update job status even on outer errors
+        try {
+          await updateJobStatus(message.message.jobId, "failed", {
+            error: outerError.message || "Unknown outer processing error",
+          });
+        } catch (statusError) {
+          console.error(
+            "Failed to update job status on outer error:",
+            statusError
+          );
+        }
       }
 
       // If message wasn't properly handled, we need to break to avoid infinite loop
@@ -469,11 +501,11 @@ app.post("/poll", authenticateRequest, async (req, res) => {
 
 /**
  * ユーザーのシークレット情報取得
- * 
+ *
  * Supabase Vaultからユーザーの認証情報を安全に取得
  * - Anthropic API Key: Claude Code SDK用
  * - GitHub Token: GitHub MCP用
- * 
+ *
  * @param {string} userId - ユーザーID
  * @returns {Object} secrets - ユーザーの認証情報
  */
@@ -525,15 +557,15 @@ async function getUserSecrets(userId) {
 
 /**
  * Claude Code SDKを使用したリポジトリ解析・評価処理
- * 
+ *
  * このメソッドはHackScoreAIの中核となる評価ロジックです。
  * Claude Code SDKとGitHub MCPを連携させて以下の流れで処理します：
- * 
+ *
  * 1. GitHub MCPを使用してリポジトリ構造・ファイル取得
  * 2. Claude Code SDKでコード解析・評価プロンプト実行
  * 3. ハッカソン評価基準に基づくスコアリング
  * 4. JSON形式での評価結果取得・バリデーション
- * 
+ *
  * @param {string} repoName - GitHubリポジトリ名（owner/repo形式）
  * @param {Object} secrets - ユーザーの認証情報
  * @param {Object} evaluationCriteria - 評価基準（現在未使用、将来拡張予定）
@@ -572,83 +604,177 @@ async function processRepositoryWithClaudeCode(
       )}... for Claude Code`
     );
 
-    // Claude Code SDK設定
-    // GitHub MCPサーバーと連携してリポジトリアクセス可能にする
-    const queryOptions = {
-      prompt,
-      abortController,
-      options: {
-        maxTurns: config.processing.maxTurns, // 最大ターン数制限
-        apiKey: secrets.anthropicKey, // Anthropic API Key
-        mcpServers: {
-          // GitHub MCP設定 - GitHubリポジトリアクセス用
-          github: {
-            command: "npx",
-            args: ["-y", "@modelcontextprotocol/server-github"],
-            env: {
-              GITHUB_PERSONAL_ACCESS_TOKEN: secrets.githubToken, // GitHub認証
-            },
-          },
-        },
-        // 許可されたMCPツール一覧
-        // リポジトリ構造取得、ファイル内容読み取り、コード検索等
-        allowedTools: [
-          "mcp__github__get_file_contents",
-          "mcp__github__search_repositories",
-          "mcp__github__search_code",
-          "mcp__github__list_commits",
-          "mcp__github__get_repository_structure",
-          "mcp__github__list_repository_contents",
-        ],
-      },
-    };
+    // CloudRun環境での動的インポート解決:
+    // ユーザーのAPIキーとGitHubトークンを環境変数に設定してから、Claude Code SDKを動的にインポート
+    process.env.ANTHROPIC_API_KEY = secrets.anthropicKey;
+    process.env.GITHUB_TOKEN = secrets.githubToken;
+    process.env.GITHUB_PERSONAL_ACCESS_TOKEN = secrets.githubToken;
+    console.log(
+      `🔒 Set ANTHROPIC_API_KEY environment variable for Claude Code`
+    );
+    console.log(`🔒 Set GITHUB_TOKEN environment variable for GitHub MCP`);
 
-    // Claude Code SDK実行・結果処理
+    // Claude Code SDKを動的にインポート（環境変数設定後）
+    console.log(`📦 Dynamically importing Claude Code SDK...`);
+    const { query } = await import("@anthropic-ai/claude-code");
+    console.log(`✅ Claude Code SDK imported successfully`);
+
+    // 🚀 Claude Code SDK 実行
+    console.log(`🚀 Starting Claude Code SDK analysis...`);
+    console.log(`🔍 Prompt length: ${prompt.length}`);
+    console.log(`🔍 Max turns: ${config.processing.maxTurns}`);
+    console.log(
+      `🔍 GitHub Token for MCP: ${secrets.githubToken?.substring(0, 10)}...`
+    );
+    console.log(`🔍 Repository being analyzed: ${repoName}`);
+
     let evaluationResult = null;
     let numTurns = 0;
     let totalCostUsd = 0;
 
-    // Claude Code SDKのストリーミング処理
-    // GitHub MCPでリポジトリ解析 → Claude評価 → JSON結果取得
-    for await (const message of query(queryOptions)) {
-      numTurns++;
+    try {
+      // Claude Code SDKを直接実行
+      const messages = [];
 
-      if (message.type === "assistant") {
-        console.log(`Turn ${numTurns}: Assistant response`);
+      for await (const message of query({
+        prompt,
+        options: {
+          maxTurns: config.processing.maxTurns,
+          permissionMode: "bypassPermissions", // ★ 非対話環境では必須
+          mcpServers: {
+            github: {
+              command: "npx",
+              args: ["-y", "@modelcontextprotocol/server-github"],
+              env: {
+                GITHUB_TOKEN: secrets.githubToken, // ★ ここを戻す
+                GITHUB_PERSONAL_ACCESS_TOKEN: secrets.githubToken, //   片方だけでも OK
+              },
+              /* 公式ホスト。環境変数に URL を持たせても OK */
+              // url: "https://api.githubcopilot.com/mcp/github",
+              // authorization_token: secrets.githubToken, // PAT をそのままヘッダに付ける
+            },
+          },
+          allowedTools: [
+            "mcp__github__get_file_contents",
+            "mcp__github__search_repositories",
+            "mcp__github__search_code",
+            "mcp__github__list_commits",
+            "mcp__github__get_repository_structure",
+            "mcp__github__list_repository_contents",
+          ],
+        },
+      })) {
+        console.log(`\n📝 ===== Turn ${numTurns + 1}: ${message.type} =====`);
+        messages.push(message);
 
-        // Claude Code レスポンスからテキスト抽出
-        let contentText = "";
-        if (typeof message.message.content === "string") {
-          contentText = message.message.content;
-        } else if (Array.isArray(message.message.content)) {
-          contentText = message.message.content
-            .filter((item) => item.type === "text")
-            .map((item) => item.text)
-            .join("");
-        }
+        if (message.type === "assistant") {
+          numTurns++;
 
-        // 評価結果JSON抽出・バリデーション
-        const extractedJson = extractJsonFromText(contentText);
-        if (extractedJson && validateEvaluationResult(extractedJson)) {
-          evaluationResult = extractedJson;
-          console.log(
-            "✅ Valid evaluation result JSON detected - continuing to completion"
-          );
-          // Claude Code SDKの正常完了を待つ（breakしない）
-        }
-      } else if (message.type === "result") {
-        if (message.subtype === "success") {
-          numTurns = message.num_turns;
-          totalCostUsd = message.total_cost_usd;
-          console.log(
-            `📊 Analysis completed - Turns: ${numTurns}, Cost: $${totalCostUsd.toFixed(
-              4
-            )}`
-          );
-        } else {
-          throw new Error(`Analysis failed: ${message.subtype}`);
+          // Claude Code レスポンスからテキスト抽出と詳細ログ
+          let contentText = "";
+          if (typeof message.message?.content === "string") {
+            contentText = message.message.content;
+            console.log(
+              `💬 Assistant response (string): ${contentText.substring(
+                0,
+                200
+              )}...`
+            );
+          } else if (Array.isArray(message.message?.content)) {
+            // コンテンツの詳細を解析
+            for (const item of message.message.content) {
+              if (item.type === "text") {
+                contentText += item.text;
+                console.log(
+                  `💬 Assistant text: ${item.text.substring(0, 200)}...`
+                );
+              } else if (item.type === "tool_use") {
+                console.log(`🔧 MCP Tool Call: ${item.name}`);
+                console.log(`   Tool ID: ${item.id}`);
+                console.log(
+                  `   Parameters: ${JSON.stringify(item.input, null, 2)}`
+                );
+
+                // GitHubファイル参照の詳細ログ
+                if (item.name === "mcp__github__get_file_contents") {
+                  console.log(`   📄 File: ${item.input.path || "N/A"}`);
+                  console.log(
+                    `   📦 Repository: ${item.input.repository || "N/A"}`
+                  );
+                } else if (item.name === "mcp__github__search_code") {
+                  console.log(
+                    `   🔍 Search Query: ${item.input.query || "N/A"}`
+                  );
+                  console.log(
+                    `   📦 Repository: ${item.input.repository || "N/A"}`
+                  );
+                } else if (
+                  item.name === "mcp__github__list_repository_contents"
+                ) {
+                  console.log(`   📁 Path: ${item.input.path || "/"}`);
+                  console.log(
+                    `   📦 Repository: ${item.input.repository || "N/A"}`
+                  );
+                }
+              }
+            }
+          }
+
+          // 評価結果JSON抽出・バリデーション
+          const extractedJson = extractJsonFromText(contentText);
+          if (extractedJson && validateEvaluationResult(extractedJson)) {
+            evaluationResult = extractedJson;
+            console.log("✅ Valid evaluation result JSON detected");
+          }
+        } else if (message.type === "user") {
+          // ユーザーメッセージ（ツール結果など）の詳細ログ
+          if (Array.isArray(message.message?.content)) {
+            for (const item of message.message.content) {
+              if (item.type === "tool_result") {
+                console.log(`🔨 Tool Result - ID: ${item.tool_use_id}`);
+
+                // エラーチェック
+                if (item.is_error) {
+                  console.error(`❌ MCP Tool Error: ${item.content}`);
+                } else {
+                  if (typeof item.content === "string") {
+                    console.log(
+                      `   Result (first 500 chars): ${item.content.substring(
+                        0,
+                        500
+                      )}...`
+                    );
+                  } else if (Array.isArray(item.content)) {
+                    for (const contentItem of item.content) {
+                      if (contentItem.type === "text") {
+                        console.log(
+                          `   Result text: ${contentItem.text.substring(
+                            0,
+                            500
+                          )}...`
+                        );
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } else if (message.type === "result") {
+          if (message.subtype === "success") {
+            numTurns = message.num_turns || numTurns;
+            totalCostUsd = message.total_cost_usd || 0;
+            console.log(
+              `📊 Analysis completed - Turns: ${numTurns}, Cost: $${totalCostUsd.toFixed(
+                4
+              )}`
+            );
+          }
+          break;
         }
       }
+    } catch (error) {
+      throw error;
     }
 
     // タイムアウトをクリア
@@ -1065,12 +1191,12 @@ function validateEvaluationResult(data) {
 
 /**
  * 評価結果のSupabaseデータベース保存
- * 
+ *
  * save_evaluation_result RPCを呼び出して以下データを保存：
  * - 評価スコア（totalScore、各項目スコア）
  * - 評価コメント（positives、negatives、overallComment）
  * - 処理メタデータ（ターン数、コスト等）
- * 
+ *
  * @param {string} jobId - ジョブID
  * @param {string} userId - ユーザーID
  * @param {string} repositoryName - リポジトリ名
@@ -1119,7 +1245,7 @@ async function saveEvaluationResult(
 
 /**
  * ジョブステータスレコードの確保
- * 
+ *
  * job_statusテーブルにレコードが存在しない場合は作成
  * 重複エラーは無視（既存レコードがある場合）
  */
@@ -1144,12 +1270,12 @@ async function ensureJobStatus(jobId, userId, payload) {
 
 /**
  * ジョブステータス更新
- * 
+ *
  * job_statusテーブルのステータスと結果を更新
  * - processing: 処理中
  * - completed: 完了
  * - failed: 失敗
- * 
+ *
  * @param {string} jobId - ジョブID
  * @param {string} status - ステータス
  * @param {Object} result - 結果データ（任意）
