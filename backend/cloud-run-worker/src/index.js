@@ -1,33 +1,42 @@
 /**
- * Cloud Run Worker - GitHubリポジトリ評価システム
+ * HackScore AI - GitHub Repository Analysis Worker
  *
- * このWorkerは、Supabaseのキュー（pgmq）からGitHubリポジトリ評価ジョブを取得し、
- * Claude Code SDKを使用してリポジトリを解析・評価を行います。
+ * A high-performance worker service that analyzes GitHub repositories using Claude Code SDK
+ * and evaluates them based on hackathon criteria. This worker processes jobs from a
+ * Supabase pgmq queue and provides comprehensive repository analysis.
  *
- * 主な機能：
- * - Supabase pgmqキューからジョブを取得・処理
- * - Claude Code SDK + GitHub MCPを使用したリポジトリ解析
- * - ハッカソン評価基準に基づくスコアリング
- * - 評価結果のSupabaseデータベースへの保存
- * - 認証・ログ・エラーハンドリング
+ * Features:
+ * - Queue-based job processing with Supabase pgmq
+ * - GitHub repository analysis using Claude Code SDK with MCP (Model Context Protocol)
+ * - Hackathon-specific evaluation criteria scoring
+ * - Secure credential management via Supabase Vault
+ * - Production-ready deployment for Cloud Run and Compute Engine
+ * - Comprehensive logging and error handling
+ * - RESTful API endpoints for health checks and manual processing
+ *
+ * @author HackScore AI Team
+ * @version 1.0.0
+ * @license MIT
  */
 
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
 import "dotenv/config";
 
-// Express.jsアプリケーションの設定
-// Cloud Runで動作するHTTPサーバーとして機能
+// Initialize Express application
+// Serves as the main HTTP server for processing repository analysis jobs
 const app = express();
-app.use(express.json()); // JSONリクエストボディのパース
+app.use(express.json()); // Parse JSON request bodies
 
 // Environment variables validation
+// These are required for the worker to function properly
 const requiredEnvVars = [
   "SUPABASE_URL",
   "SUPABASE_SERVICE_ROLE_KEY",
   "CLOUD_RUN_AUTH_TOKEN",
 ];
 
+// Validate all required environment variables are present
 for (const envVar of requiredEnvVars) {
   if (!process.env[envVar]) {
     console.error(`❌ Missing required environment variable: ${envVar}`);
@@ -35,7 +44,8 @@ for (const envVar of requiredEnvVars) {
   }
 }
 
-// Configuration from environment variables
+// Application configuration from environment variables
+// Centralized configuration management for better maintainability
 const config = {
   supabase: {
     url: process.env.SUPABASE_URL,
@@ -61,15 +71,24 @@ const config = {
   },
 };
 
+// Initialize Supabase client with service role key
+// Used for database operations and pgmq queue management
 const supabase = createClient(
   config.supabase.url,
   config.supabase.serviceRoleKey
 );
 
-// Middleware for authentication
+/**
+ * Authentication middleware for protected endpoints
+ * Validates Bearer token against configured auth token
+ *
+ * @param {Request} req - Express request object
+ * @param {Response} res - Express response object
+ * @param {NextFunction} next - Express next function
+ */
 const authenticateRequest = (req, res, next) => {
   const authHeader = req.headers.authorization;
-  const token = authHeader && authHeader.split(" ")[1]; // Bearer TOKEN
+  const token = authHeader && authHeader.split(" ")[1]; // Extract Bearer token
 
   if (!token || token !== config.auth.token) {
     return res.status(401).json({
@@ -81,8 +100,13 @@ const authenticateRequest = (req, res, next) => {
   next();
 };
 
-// ヘルスチェックエンドポイント（認証不要）
-// Cloud Runのヘルスチェックとサービス監視に使用
+/**
+ * Health check endpoint (No authentication required)
+ * Used by load balancers and monitoring systems to verify service health
+ *
+ * @route GET /health
+ * @returns {Object} Service health status and configuration
+ */
 app.get("/health", (req, res) => {
   console.log(`🏥 Health check request received from ${req.ip}`);
   res.json({
@@ -98,16 +122,26 @@ app.get("/health", (req, res) => {
   });
 });
 
-// テスト用エンドポイント
-// 基本的な動作確認用
+/**
+ * Simple test endpoint for basic connectivity verification
+ *
+ * @route GET /test
+ * @returns {String} Simple greeting message
+ */
 app.get("/test", (req, res) => {
   console.log(`🧪 Test request received from ${req.ip}`);
   res.send("Hello from Cloud Run Worker!");
 });
 
-// 単一リポジトリ処理エンドポイント（認証必須）
-// フロントエンドまたは内部のpollエンドポイントから呼び出される
-// Claude Code SDKを使用してGitHubリポジトリを解析・評価
+/**
+ * Single repository processing endpoint (Authentication required)
+ * Processes a single GitHub repository analysis job
+ * Called by frontend or internal polling system
+ *
+ * @route POST /process
+ * @param {Object} req.body - Job details including repository, userId, evaluationCriteria, jobId, hackathonId
+ * @returns {Object} Processing result with success status and evaluation data
+ */
 app.post("/process", authenticateRequest, async (req, res) => {
   try {
     console.log("🔍 Request body received:", JSON.stringify(req.body, null, 2));
@@ -119,23 +153,24 @@ app.post("/process", authenticateRequest, async (req, res) => {
       repository
     );
 
-    // Ensure job_status record exists
+    // Ensure job status record exists in database
     await ensureJobStatus(jobId, userId, { ...req.body, hackathonId });
 
-    // Vaultからユーザーの秘密情報を取得
+    // Retrieve user credentials from Supabase Vault
     const secrets = await getUserSecrets(userId);
 
     console.log(`🔑 Retrieved secrets from Vault for user: ${userId}`);
     console.log(`🔑 Anthropic Key available: ${!!secrets.anthropicKey}`);
     console.log(`🔑 GitHub Token available: ${!!secrets.githubToken}`);
 
-    // Process the single repository with ClaudeCode
+    // Process repository using Claude Code SDK
     const result = await processRepositoryWithClaudeCode(
       repository,
       secrets,
       evaluationCriteria
     );
 
+    // Save evaluation results to database if processing succeeded
     if (result.success) {
       try {
         console.log(`💾 Saving evaluation result for ${repository}...`);
@@ -145,7 +180,7 @@ app.post("/process", authenticateRequest, async (req, res) => {
           JSON.stringify(result.evaluation, null, 2)
         );
 
-        // Save to Supabase database
+        // Store evaluation results in Supabase
         const saveResult = await saveEvaluationResult(
           jobId,
           userId,
@@ -173,7 +208,7 @@ app.post("/process", authenticateRequest, async (req, res) => {
       }
     }
 
-    // Update job status in Supabase
+    // Update job status in database
     const status = result.success ? "completed" : "failed";
     console.log(`📝 Updating job status to "${status}" for job ${jobId}...`);
 
@@ -199,6 +234,7 @@ app.post("/process", authenticateRequest, async (req, res) => {
       );
     }
 
+    // Return processing results
     res.json({
       success: true,
       jobId,
@@ -213,6 +249,7 @@ app.post("/process", authenticateRequest, async (req, res) => {
   } catch (error) {
     console.error("Error processing job:", error);
 
+    // Update job status to failed if jobId is available
     if (req.body.jobId) {
       await updateJobStatus(req.body.jobId, "failed", { error: error.message });
     }
@@ -224,9 +261,14 @@ app.post("/process", authenticateRequest, async (req, res) => {
   }
 });
 
-// Supabaseキューポーリング・ジョブ処理エンドポイント（認証必須）
-// pgmqキューからジョブを連続的に取得・処理
-// Google Cloud Schedulerから定期実行される
+/**
+ * Queue polling endpoint for continuous job processing (Authentication required)
+ * Continuously polls Supabase pgmq queue for pending analysis jobs
+ * Typically called by Google Cloud Scheduler or similar cron systems
+ *
+ * @route POST /poll
+ * @returns {Object} Summary of processed jobs including count and status
+ */
 app.post("/poll", authenticateRequest, async (req, res) => {
   try {
     console.log("📥 Starting continuous polling for jobs...");
@@ -235,25 +277,26 @@ app.post("/poll", authenticateRequest, async (req, res) => {
     let hasErrors = false;
     let lastError = null;
 
-    // Check initial queue state for debugging
+    // Log initial queue state for monitoring
     const { data: initialQueueStats } = await supabase.rpc("pgmq_metrics", {
       queue_name: "repo_analysis_queue",
     });
     console.log("📊 Initial queue state:", initialQueueStats);
 
+    // Main polling loop - processes jobs until queue is empty
     while (true) {
       console.log(`🔄 Polling iteration ${processedCount + 1}...`);
 
-      // Read from pgmq queue with extended timeout
+      // Read message from pgmq queue with extended visibility timeout
       console.log("🔍 Reading from pgmq queue with params:", {
         queue_name: "repo_analysis_queue",
-        visibility_timeout: 3600, // 60分（Cloud Run最大タイムアウト）
+        visibility_timeout: 3600, // 60 minutes for long-running analysis
         qty: 1,
       });
 
       const { data: messages, error } = await supabase.rpc("pgmq_read", {
         queue_name: "repo_analysis_queue",
-        visibility_timeout: 3600, // 60分（Cloud Run最大タイムアウト）
+        visibility_timeout: 3600, // Extended timeout for comprehensive analysis
         qty: 1,
       });
 
@@ -264,6 +307,7 @@ app.post("/poll", authenticateRequest, async (req, res) => {
           messages && messages.length > 0 ? messages[0].msg_id : null,
       });
 
+      // Handle queue read errors
       if (error) {
         console.error("❌ Queue read error details:", error);
         hasErrors = true;
@@ -271,12 +315,13 @@ app.post("/poll", authenticateRequest, async (req, res) => {
         break;
       }
 
+      // Exit loop if no more messages in queue
       if (!messages || messages.length === 0) {
         console.log(
           `ℹ️ No more messages in queue - processed ${processedCount} jobs total`
         );
 
-        // Log final queue state for debugging
+        // Log final queue metrics for monitoring
         const { data: finalQueueStats } = await supabase.rpc("pgmq_metrics", {
           queue_name: "repo_analysis_queue",
         });
@@ -284,6 +329,7 @@ app.post("/poll", authenticateRequest, async (req, res) => {
         break;
       }
 
+      // Process the received message
       const message = messages[0];
       console.log("📨 Processing message:", message.msg_id);
       console.log(
@@ -297,17 +343,19 @@ app.post("/poll", authenticateRequest, async (req, res) => {
       let messageHandled = false;
 
       try {
-        // Process the job
+        // Process the job by calling internal /process endpoint
         console.log(
           `🚀 Starting processing for job ${message.message.jobId}...`
         );
-        // AbortControllerを使用してタイムアウトを設定
+
+        // Set up timeout controller for long-running jobs
         const controller = new AbortController();
         const timeout = setTimeout(() => {
           controller.abort();
-        }, config.processing.timeoutMs + 300000); // 処理タイムアウト + 5分のバッファ
+        }, config.processing.timeoutMs + 300000); // Processing timeout + 5 minute buffer
 
         try {
+          // Make internal HTTP request to process endpoint
           const processResult = await fetch(
             `http://localhost:${config.server.port}/process`,
             {
@@ -321,14 +369,14 @@ app.post("/poll", authenticateRequest, async (req, res) => {
             }
           );
 
-          clearTimeout(timeout); // タイムアウトをクリア
+          clearTimeout(timeout); // Clear timeout on completion
 
           if (processResult.ok) {
             console.log(
               `✅ Job ${message.message.jobId} processing completed successfully`
             );
 
-            // Delete message from queue on success with verification
+            // Delete processed message from queue
             console.log(`🗑️ Deleting message ${message.msg_id} from queue...`);
             const { data: deleteResult, error: deleteError } =
               await supabase.rpc("pgmq_delete", {
@@ -361,6 +409,7 @@ app.post("/poll", authenticateRequest, async (req, res) => {
             });
             processedCount++;
           } else {
+            // Handle processing failure
             const errorText = await processResult.text();
             console.error(
               `❌ Job ${message.message.jobId} processing failed with status: ${processResult.status}, response: ${errorText}`
@@ -371,7 +420,7 @@ app.post("/poll", authenticateRequest, async (req, res) => {
               error: `Process endpoint returned status ${processResult.status}: ${errorText}`,
             });
 
-            // Archive failed message with verification
+            // Archive failed message for later analysis
             console.log(`📦 Archiving failed message ${message.msg_id}...`);
             const { data: archiveResult, error: archiveError } =
               await supabase.rpc("pgmq_archive", {
@@ -396,7 +445,7 @@ app.post("/poll", authenticateRequest, async (req, res) => {
             lastError = `Process failed with status: ${processResult.status}`;
           }
         } catch (processError) {
-          clearTimeout(timeout); // タイムアウトをクリア
+          clearTimeout(timeout); // Clear timeout on exception
 
           console.error(
             `❌ Job ${message.message.jobId} processing exception:`,
@@ -408,7 +457,7 @@ app.post("/poll", authenticateRequest, async (req, res) => {
             error: processError.message || "Unknown processing error",
           });
 
-          // Archive failed message with verification
+          // Archive message that caused exception
           console.log(`📦 Archiving exception message ${message.msg_id}...`);
           const { data: archiveResult, error: archiveError } =
             await supabase.rpc("pgmq_archive", {
@@ -439,7 +488,8 @@ app.post("/poll", authenticateRequest, async (req, res) => {
         );
         hasErrors = true;
         lastError = outerError.message;
-        // Try to update job status even on outer errors
+
+        // Attempt to update job status even on outer errors
         try {
           await updateJobStatus(message.message.jobId, "failed", {
             error: outerError.message || "Unknown outer processing error",
@@ -452,7 +502,7 @@ app.post("/poll", authenticateRequest, async (req, res) => {
         }
       }
 
-      // If message wasn't properly handled, we need to break to avoid infinite loop
+      // Prevent infinite loops by ensuring message was handled
       if (!messageHandled) {
         console.error(
           `⚠️ Message ${message.msg_id} was not properly handled (not deleted or archived), breaking to avoid infinite loop`
@@ -462,7 +512,7 @@ app.post("/poll", authenticateRequest, async (req, res) => {
         break;
       }
 
-      // Check queue state after processing for debugging
+      // Log queue state after processing for monitoring
       const { data: midQueueStats } = await supabase.rpc("pgmq_metrics", {
         queue_name: "repo_analysis_queue",
       });
@@ -475,7 +525,7 @@ app.post("/poll", authenticateRequest, async (req, res) => {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
-    // Return summary of all processed jobs
+    // Return comprehensive summary of polling session
     const response = {
       success: true,
       processedCount,

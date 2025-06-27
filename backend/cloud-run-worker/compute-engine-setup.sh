@@ -1,212 +1,300 @@
 #!/bin/bash
-set -e
 
-echo "==============================================="
-echo "🚀 HackScore Worker - Complete Setup for Compute Engine"
-echo "==============================================="
+# HackScore AI Worker - Compute Engine Automated Setup Script
+# This script sets up a production-ready environment for the HackScore AI Worker
+# on Google Compute Engine with Ubuntu Pro 22.04 LTS
+
+set -e  # Exit on any error
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Configuration
+PROJECT_ID=${1:-"hackscore-ai-production"}
+ZONE=${2:-"asia-northeast1-a"}
+INSTANCE_NAME=${3:-"hackscore-worker-v2"}
+MACHINE_TYPE=${4:-"e2-standard-4"}
+APP_DIR="/opt/hackscore-worker"
+SERVICE_NAME="hackscore-worker"
+
+echo -e "${BLUE}🚀 HackScore AI Worker - Compute Engine Setup${NC}"
+echo -e "${YELLOW}Project: ${PROJECT_ID}${NC}"
+echo -e "${YELLOW}Zone: ${ZONE}${NC}"
+echo -e "${YELLOW}Instance: ${INSTANCE_NAME}${NC}"
+echo ""
+
+# Function to log messages
+log_info() {
+    echo -e "${GREEN}✅ $1${NC}"
+}
+
+log_warning() {
+    echo -e "${YELLOW}⚠️  $1${NC}"
+}
+
+log_error() {
+    echo -e "${RED}❌ $1${NC}"
+}
+
+# Check if running on Compute Engine
+if [ ! -f /etc/google_compute_engine ]; then
+    log_error "This script must be run on a Google Compute Engine instance"
+    exit 1
+fi
+
+log_info "Starting HackScore AI Worker setup on Compute Engine..."
 
 # Update system packages
-echo "📦 Updating system packages..."
+log_info "Updating system packages..."
 sudo apt-get update -y
 sudo apt-get upgrade -y
 
 # Install essential packages
-echo "📦 Installing essential packages..."
+log_info "Installing essential packages..."
 sudo apt-get install -y \
     curl \
-    wget \
     git \
-    build-essential \
+    unzip \
     software-properties-common \
     apt-transport-https \
     ca-certificates \
     gnupg \
     lsb-release \
-    unzip \
-    jq
+    jq \
+    htop \
+    vim \
+    tmux
 
-# Install Node.js (Latest LTS)
-echo "📦 Installing Node.js..."
-curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+# Install Node.js 20.x (LTS)
+log_info "Installing Node.js 20.x LTS..."
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
 # Verify Node.js installation
-echo "✅ Node.js version: $(node --version)"
-echo "✅ npm version: $(npm --version)"
+NODE_VERSION=$(node --version)
+NPM_VERSION=$(npm --version)
+log_info "Node.js version: ${NODE_VERSION}"
+log_info "npm version: ${NPM_VERSION}"
 
 # Install Google Cloud SDK (if not already installed)
-echo "📦 Installing Google Cloud SDK..."
 if ! command -v gcloud &> /dev/null; then
-    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
-    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
-    sudo apt-get update -y
-    sudo apt-get install -y google-cloud-cli
+    log_info "Installing Google Cloud SDK..."
+    curl https://sdk.cloud.google.com | bash
+    exec -l $SHELL
+    source ~/.bashrc
 else
-    echo "✅ Google Cloud SDK already installed"
+    log_info "Google Cloud SDK already installed"
 fi
 
-# Authenticate with Google Cloud using instance service account
-echo "🔐 Configuring Google Cloud authentication..."
-gcloud config set project hackscore-ai-production
-gcloud auth application-default print-access-token > /dev/null 2>&1 && echo "✅ Authentication successful"
+# Configure Google Cloud SDK
+log_info "Configuring Google Cloud SDK..."
+gcloud config set project ${PROJECT_ID}
+gcloud config set compute/zone ${ZONE}
 
 # Create application directory
-echo "📁 Creating application directory..."
-sudo mkdir -p /opt/hackscore-worker
-sudo chown $(whoami):$(whoami) /opt/hackscore-worker
-cd /opt/hackscore-worker
+log_info "Creating application directory: ${APP_DIR}"
+sudo mkdir -p ${APP_DIR}
+sudo chown $(whoami):$(whoami) ${APP_DIR}
 
-# Download application source code
-echo "📥 Downloading application source code..."
-# Note: This will be updated to copy from local files
+# Clone or copy application code
+if [ -d "${APP_DIR}/src" ]; then
+    log_warning "Application code already exists in ${APP_DIR}"
+else
+    log_info "Setting up application code..."
+    cd ${APP_DIR}
+    
+    # If running from the repository directory, copy files
+    if [ -f "package.json" ]; then
+        log_info "Copying application files from current directory..."
+        cp package*.json ${APP_DIR}/
+        cp -r src/ ${APP_DIR}/
+    else
+        log_info "Please copy your application files to ${APP_DIR}"
+        log_info "Required files: package.json, package-lock.json, src/"
+        log_warning "Setup will continue, but you need to copy files manually"
+    fi
+fi
 
-# Create package.json
-cat > package.json << 'EOF'
-{
-  "name": "hackscore-cloudrun-worker",
-  "version": "1.0.0",
-  "description": "ClaudeCode worker for HackScoreAI on Compute Engine",
-  "main": "src/index.js",
-  "type": "module",
-  "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
-    "build": "echo 'No build step required'",
-    "test": "echo 'No tests specified'"
-  },
-  "dependencies": {
-    "@anthropic-ai/claude-code": "^1.0.31",
-    "@supabase/supabase-js": "^2.39.3",
-    "express": "^4.18.2",
-    "dotenv": "^16.3.1"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  }
-}
-EOF
+# Install Node.js dependencies
+if [ -f "${APP_DIR}/package.json" ]; then
+    log_info "Installing Node.js dependencies..."
+    cd ${APP_DIR}
+    npm ci --production
+else
+    log_warning "package.json not found, skipping npm install"
+fi
 
-# Create src directory
-mkdir -p src
+# Create environment file from secrets
+log_info "Setting up environment variables from Google Secret Manager..."
+cat > ${APP_DIR}/.env << 'EOF'
+# HackScore AI Worker Environment Configuration
+# These values are loaded from Google Cloud Secret Manager
 
-# Install dependencies
-echo "📦 Installing Node.js dependencies..."
-npm install
-
-# Create environment file
-echo "🔧 Creating environment configuration..."
-cat > .env << 'EOF'
 NODE_ENV=production
 PORT=8080
+LOG_LEVEL=info
+
+# Processing Configuration
 MAX_TURNS_PER_ANALYSIS=200
 ANALYSIS_TIMEOUT_MS=1800000
-LOG_LEVEL=info
 ESTIMATED_COST_PER_TOKEN=0.000003
 
-# Node.js and npm Configuration for Claude Code SDK
+# Claude Code SDK Configuration
 NPM_CONFIG_PREFIX=/tmp/.npm-global
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/tmp/.npm-global/bin
-HOME=/opt/hackscore-worker
+HOME=/tmp
 TMPDIR=/tmp
 NPM_CONFIG_CACHE=/tmp/.npm
 NPM_CONFIG_UNSAFE_PERM=true
 NODE_OPTIONS=--max-old-space-size=8192
-XDG_CONFIG_HOME=/opt/hackscore-worker/.config
+XDG_CONFIG_HOME=/tmp/.config
 EOF
 
-# Create necessary directories
-echo "📁 Creating necessary directories..."
-mkdir -p /tmp/.npm-global
-mkdir -p /opt/hackscore-worker/.config
-sudo chown -R $(whoami):$(whoami) /opt/hackscore-worker
+# Create startup script that loads secrets
+log_info "Creating startup script with secret loading..."
+cat > ${APP_DIR}/start.sh << 'EOF'
+#!/bin/bash
 
-# Set up systemd service
-echo "⚙️ Creating systemd service..."
-sudo tee /etc/systemd/system/hackscore-worker.service > /dev/null << 'EOF'
+# HackScore AI Worker Startup Script
+# This script loads secrets from Google Cloud Secret Manager and starts the worker
+
+set -e
+
+APP_DIR="/opt/hackscore-worker"
+cd ${APP_DIR}
+
+echo "🔑 Loading secrets from Google Cloud Secret Manager..."
+
+# Load secrets and export as environment variables
+export SUPABASE_URL=$(gcloud secrets versions access latest --secret='supabase-url' --project='hackscore-ai-production' 2>/dev/null || echo "")
+export SUPABASE_SERVICE_ROLE_KEY=$(gcloud secrets versions access latest --secret='supabase-service-role-key' --project='hackscore-ai-production' 2>/dev/null || echo "")
+export CLOUD_RUN_AUTH_TOKEN=$(gcloud secrets versions access latest --secret='cloud-run-auth-token' --project='hackscore-ai-production' 2>/dev/null || echo "")
+
+# Validate required secrets
+if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ] || [ -z "$CLOUD_RUN_AUTH_TOKEN" ]; then
+    echo "❌ Error: Failed to load required secrets from Secret Manager"
+    echo "Required secrets: supabase-url, supabase-service-role-key, cloud-run-auth-token"
+    exit 1
+fi
+
+echo "✅ Secrets loaded successfully"
+echo "🚀 Starting HackScore AI Worker..."
+
+# Start the application
+exec node src/index.js
+EOF
+
+chmod +x ${APP_DIR}/start.sh
+
+# Create systemd service file
+log_info "Creating systemd service..."
+sudo tee /etc/systemd/system/${SERVICE_NAME}.service > /dev/null << EOF
 [Unit]
-Description=HackScore Worker Service
+Description=HackScore AI Worker - GitHub Repository Analysis Service
+Documentation=https://github.com/your-org/hackscore-ai
 After=network.target
-Wants=network.target
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
-WorkingDirectory=/opt/hackscore-worker
-Environment=NODE_ENV=production
-EnvironmentFile=/opt/hackscore-worker/.env
-ExecStart=/usr/bin/node src/index.js
+User=nobody
+Group=nogroup
+WorkingDirectory=${APP_DIR}
+ExecStart=${APP_DIR}/start.sh
 Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=hackscore-worker
+SyslogIdentifier=${SERVICE_NAME}
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=${APP_DIR}
+
+# Environment
+Environment=NODE_ENV=production
+Environment=PORT=8080
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# Enable and start the service (will start after index.js is copied)
+# Configure firewall
+log_info "Configuring firewall rules..."
+if ! gcloud compute firewall-rules describe allow-hackscore-worker &>/dev/null; then
+    log_info "Creating firewall rule for port 8080..."
+    gcloud compute firewall-rules create allow-hackscore-worker \
+        --allow tcp:8080 \
+        --source-ranges 0.0.0.0/0 \
+        --description "Allow HackScore AI Worker HTTP traffic" \
+        --project=${PROJECT_ID}
+else
+    log_info "Firewall rule already exists"
+fi
+
+# Enable and start the service
+log_info "Enabling and starting systemd service..."
 sudo systemctl daemon-reload
-sudo systemctl enable hackscore-worker
+sudo systemctl enable ${SERVICE_NAME}
 
-# Create log rotation
-echo "📝 Setting up log rotation..."
-sudo tee /etc/logrotate.d/hackscore-worker > /dev/null << 'EOF'
-/var/log/hackscore-worker.log {
-    daily
-    missingok
-    rotate 14
-    compress
-    delaycompress
-    notifempty
-    create 644 ubuntu ubuntu
-}
-EOF
+# Check if the service is already running
+if sudo systemctl is-active --quiet ${SERVICE_NAME}; then
+    log_info "Service is already running, restarting..."
+    sudo systemctl restart ${SERVICE_NAME}
+else
+    log_info "Starting service for the first time..."
+    sudo systemctl start ${SERVICE_NAME}
+fi
 
-# Set up firewall
-echo "🔥 Configuring firewall..."
-sudo ufw allow 8080/tcp
-sudo ufw allow ssh
-echo "y" | sudo ufw enable || true
+# Wait a moment for the service to start
+sleep 5
 
-# Create secret fetching script
-echo "🔐 Creating secret fetching script..."
-cat > fetch-secrets.sh << 'EOF'
-#!/bin/bash
-echo "🔐 Fetching secrets from Google Secret Manager..."
+# Check service status
+log_info "Checking service status..."
+sudo systemctl status ${SERVICE_NAME} --no-pager -l
 
-# Get Supabase URL
-SUPABASE_URL=$(gcloud secrets versions access latest --secret="SUPABASE_URL")
-echo "export SUPABASE_URL=\"$SUPABASE_URL\"" >> .env
+# Get instance external IP
+EXTERNAL_IP=$(curl -s "http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/external-ip" -H "Metadata-Flavor: Google")
 
-# Get Supabase Service Role Key
-SUPABASE_SERVICE_ROLE_KEY=$(gcloud secrets versions access latest --secret="SUPABASE_SERVICE_ROLE_KEY")
-echo "export SUPABASE_SERVICE_ROLE_KEY=\"$SUPABASE_SERVICE_ROLE_KEY\"" >> .env
+# Test the service
+log_info "Testing service health..."
+if curl -s "http://localhost:8080/health" > /dev/null; then
+    log_info "✅ Service is responding on localhost:8080"
+    
+    if curl -s "http://${EXTERNAL_IP}:8080/health" > /dev/null; then
+        log_info "✅ Service is accessible externally at http://${EXTERNAL_IP}:8080"
+    else
+        log_warning "Service is not accessible externally. Check firewall rules."
+    fi
+else
+    log_error "Service is not responding. Check logs with: sudo journalctl -u ${SERVICE_NAME} -f"
+fi
 
-# Get Cloud Run Auth Token
-CLOUD_RUN_AUTH_TOKEN=$(gcloud secrets versions access latest --secret="CLOUD_RUN_AUTH_TOKEN")
-echo "export CLOUD_RUN_AUTH_TOKEN=\"$CLOUD_RUN_AUTH_TOKEN\"" >> .env
-
-echo "✅ Secrets fetched successfully"
-EOF
-
-chmod +x fetch-secrets.sh
-
-# Fetch secrets
-echo "🔐 Fetching secrets..."
-./fetch-secrets.sh
-
-echo "==============================================="
-echo "✅ Setup completed successfully!"
-echo "==============================================="
-echo "📁 Application directory: /opt/hackscore-worker"
-echo "🌐 Service will be available at: http://$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip -H 'Metadata-Flavor: Google'):8080"
-echo "📝 Logs: sudo journalctl -u hackscore-worker -f"
-echo "⚙️ Service control: sudo systemctl {start|stop|restart|status} hackscore-worker"
+# Final setup information
 echo ""
-echo "🔧 Next steps:"
-echo "1. Copy src/index.js from your local development environment"
-echo "2. sudo systemctl start hackscore-worker"
-echo "3. Test the service"
-echo "===============================================" 
+echo -e "${GREEN}🎉 HackScore AI Worker setup completed!${NC}"
+echo ""
+echo -e "${BLUE}Service Information:${NC}"
+echo -e "  Instance: ${INSTANCE_NAME}"
+echo -e "  External IP: ${EXTERNAL_IP}"
+echo -e "  Service URL: http://${EXTERNAL_IP}:8080"
+echo -e "  Health Check: http://${EXTERNAL_IP}:8080/health"
+echo ""
+echo -e "${BLUE}Management Commands:${NC}"
+echo -e "  Start service:   sudo systemctl start ${SERVICE_NAME}"
+echo -e "  Stop service:    sudo systemctl stop ${SERVICE_NAME}"
+echo -e "  Restart service: sudo systemctl restart ${SERVICE_NAME}"
+echo -e "  View logs:       sudo journalctl -u ${SERVICE_NAME} -f"
+echo -e "  Service status:  sudo systemctl status ${SERVICE_NAME}"
+echo ""
+echo -e "${BLUE}Next Steps:${NC}"
+echo -e "  1. Update CLOUD_RUN_WORKER_URL secret with: http://${EXTERNAL_IP}:8080"
+echo -e "  2. Test the worker from your frontend application"
+echo -e "  3. Monitor logs for any issues"
+echo ""
+echo -e "${YELLOW}Remember to update your frontend configuration with the new worker URL!${NC}" 
